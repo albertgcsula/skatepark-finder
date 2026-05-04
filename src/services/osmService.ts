@@ -51,6 +51,44 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 }
 
+export async function reverseGeocode(lat: number, lon: number): Promise<{ name?: string; address?: string } | null> {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
+      {
+        headers: {
+          'User-Agent': 'SkateparkFinderApp/1.0',
+        },
+      }
+    );
+    const data = await response.json();
+    if (data) {
+      const addr = data.address || {};
+      const street = addr.road || addr.pedestrian || '';
+      const city = addr.city || addr.town || addr.village || '';
+      const housenumber = addr.house_number || '';
+      
+      let formattedAddress = '';
+      if (street) {
+        formattedAddress = `${housenumber ? housenumber + ' ' : ''}${street}${city ? ', ' + city : ''}`;
+      } else {
+        formattedAddress = data.display_name || '';
+      }
+
+      // Nominatim might give us a specific name for the object at these coordinates
+      const name = addr.leisure || addr.amenity || addr.park || '';
+
+      return {
+        name: name,
+        address: formattedAddress,
+      };
+    }
+  } catch (err) {
+    console.error('Reverse geocoding error:', err);
+  }
+  return null;
+}
+
 export async function fetchSkateparks(
   lat: number,
   lon: number,
@@ -85,7 +123,7 @@ export async function fetchSkateparks(
     
     if (!data.elements) return [];
 
-    const skateparks: Skatepark[] = data.elements
+    const rawSkateparks: Skatepark[] = data.elements
       .map((el: any) => {
         const tags = el.tags || {};
         
@@ -141,8 +179,27 @@ export async function fetchSkateparks(
       })
       .filter((p: any): p is Skatepark => p !== null && p.distance <= radiusMiles);
 
+    // Enrich results that are missing name or address (max 5 to avoid heavy API usage/rate limits)
+    const enrichedSkateparks = await Promise.all(
+      rawSkateparks.map(async (p, index) => {
+        if (index < 5 && (p.name === 'Unnamed Skatepark' || p.address === 'Address not available')) {
+          // Small delay between requests to be respectful to Nominatim
+          await new Promise(resolve => setTimeout(resolve, index * 200));
+          const extraData = await reverseGeocode(p.lat, p.lon);
+          if (extraData) {
+            return {
+              ...p,
+              name: p.name === 'Unnamed Skatepark' && extraData.name ? `${extraData.name.charAt(0).toUpperCase() + extraData.name.slice(1)} Skatepark` : p.name,
+              address: p.address === 'Address not available' ? extraData.address || p.address : p.address,
+            };
+          }
+        }
+        return p;
+      })
+    );
+
     // Sort by distance, closest first
-    return skateparks.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+    return enrichedSkateparks.sort((a, b) => (a.distance || 0) - (b.distance || 0));
   } catch (err) {
     console.error('Fetch skateparks error:', err);
     throw err;
