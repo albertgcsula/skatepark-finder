@@ -1,5 +1,6 @@
 import { createRouter as createTanStackRouter } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
+import { trackPageView } from './services/analytics'
 
 export function getRouter() {
   const router = createTanStackRouter({
@@ -7,6 +8,10 @@ export function getRouter() {
     scrollRestoration: true,
     defaultPreload: 'intent',
     defaultPreloadStaleTime: 0,
+  })
+
+  router.subscribe('onResolved', ({ resolvedLocation }) => {
+    trackPageView(resolvedLocation.href)
   })
 
   return router

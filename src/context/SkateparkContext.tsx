@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { Skatepark, GeocodeResult } from '../services/osmService';
 import { geocodeAddress, fetchSkateparks } from '../services/osmService';
+import { trackEvent } from '../services/analytics';
 
 interface SkateparkContextType {
   location: GeocodeResult | null;
@@ -53,6 +54,7 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const doSearch = async () => {
         setLoading(true);
         setError(null);
+        trackEvent('Search', 'perform_search', q);
         try {
           const formattedQuery = /^\d{5}(-\d{4})?$/.test(q) ? `${q}, USA` : q;
           const geo = await geocodeAddress(formattedQuery);
@@ -99,6 +101,7 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const { latitude, longitude } = position.coords;
+        trackEvent('Search', 'locate_me');
         setLocation({
           lat: latitude,
           lon: longitude,
