@@ -1,6 +1,6 @@
 # 🛹 Skatepark Finder
 
-A modern, full-stack web application built with **TanStack Start** and **Material UI** to help skaters find the best shred spots near them.
+A modern, full-stack web application built with **TanStack Start** and **Material UI** to help skaters find skateparks near them.
 
 ## 🚀 Features
 
