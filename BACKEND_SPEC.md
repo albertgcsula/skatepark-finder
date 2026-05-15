@@ -2,157 +2,322 @@
 
 This document defines the formal contract and architecture for the Skatepark Finder API. This specification follows **Spec-Driven Development (SDD)** principles—implementation must strictly adhere to these definitions.
 
----
-
-## 1. Domain Model & Data Schema (DynamoDB)
-
-The system uses a single-table design for maximum performance and cost-efficiency.
-
-**Table Name:** `Skateparks`
-**Primary Key Strategy:**
-- **PK (Partition Key):** `REGION#{zipcode|city_slug}`
-- **SK (Sort Key):** `SKATEPARK#{osm_id}`
-
-### Attributes
-| Attribute | Type | Description | Validation |
-| :--- | :--- | :--- | :--- |
-| `osm_id` | String | Unique ID from OpenStreetMap | Required |
-| `name` | String | Human-readable name (Editable) | Required, max 100 chars |
-| `description` | String | User-provided or OSM details | Max 1000 chars |
-| `image_url` | String | S3 URL or external photo link | Valid URL |
-| `lat` | Number | Latitude | -90 to 90 |
-| `lng` | Number | Longitude | -180 to 180 |
-| `address` | String | Editable physical address | Max 200 chars |
-| `surface` | String | `concrete` \| `wood` \| `asphalt` \| `metal` | Enum |
-| `type` | String | `skate_park` \| `pump_track` \| `bowl` | Enum |
-| `last_updated` | String | ISO-8601 timestamp | Required |
-| `geohash` | String | 12-char geohash for proximity search | Index Required |
+**Platform:** AWS Amplify Gen 2 (built on AWS CDK). Backend resources are defined as code in the `amplify/` directory. Amplify primitives (`defineAuth`, `defineData`, `defineStorage`, `defineFunction`) are used wherever they fit. CDK escape hatches via `backend.createStack(...)` are reserved for resources Amplify does not natively support — currently OpenSearch (§8A) and CloudWatch RUM (§8C).
 
 ---
 
-## 2. API Definition (OpenAPI 3.0 Fragment)
+## 1. Domain Model & Data Schema
 
-The backend MUST implement the following RESTful interface via AWS API Gateway.
+The backend uses **AppSync + DynamoDB** provisioned by Amplify `defineData`. Each model owns its own DynamoDB table; Amplify generates GSIs from `secondaryIndexes` declarations.
 
-```yaml
-paths:
-  /skateparks:
-    get:
-      summary: Search skateparks by location
-      # ... (params)
-  /skateparks/{id}:
-    get:
-      summary: Get details for a specific skatepark
-    patch:
-      summary: Update skatepark metadata (Name, Address, Description)
-      security: [ BearerAuth: [] ]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                name: { type: string }
-                address: { type: string }
-                description: { type: string }
-    post:
-      summary: Upload an image for a skatepark
-      # Returns a Presigned URL for S3 upload
+**File:** `amplify/data/resource.ts`
+
+```ts
+const schema = a.schema({
+  Skatepark: a
+    .model({
+      osmId: a.string().required(),
+      name: a.string().required(),
+      description: a.string(),
+      imageUrl: a.url(),
+      lat: a.float().required(),
+      lng: a.float().required(),
+      address: a.string(),
+      surface: a.enum(['concrete', 'wood', 'asphalt', 'metal']),
+      type: a.enum(['skate_park', 'pump_track', 'bowl']),
+      geohash: a.string().required(),
+      region: a.string().required(), // zipcode or city slug, used for partitioned queries
+    })
+    .secondaryIndexes((index) => [
+      index('region').sortKeys(['osmId']),
+      index('geohash'),
+    ])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read']),
+      allow.authenticated().to(['read', 'update']),
+      allow.groups(['admins']).to(['create', 'read', 'update', 'delete']),
+    ]),
+})
+```
+
+### Attribute Validation
+
+| Attribute | Type | Constraint |
+| :--- | :--- | :--- |
+| `osmId` | String | Required, unique per region |
+| `name` | String | Required, max 100 chars (enforced in resolver) |
+| `description` | String | Max 1000 chars |
+| `imageUrl` | URL | Validated by AppSync scalar |
+| `lat` | Float | -90 to 90 |
+| `lng` | Float | -180 to 180 |
+| `address` | String | Max 200 chars |
+| `geohash` | String | 12-char, GSI-indexed |
+| `region` | String | Partition analog (zipcode or city slug) |
+
+**Deviation from prior spec:** The original spec called for a single-table design (`PK=REGION#zip`, `SK=SKATEPARK#osm_id`). Amplify `defineData` generates per-model tables. Per-model is accepted for the trade of: free typed client generation, free subscriptions, free auth-rule enforcement, and zero resolver code. If write throughput or cost ever forces a revisit, the underlying CDK construct is reachable via `backend.data.resources.tables.Skatepark` for targeted overrides without abandoning the Amplify project.
+
+---
+
+## 2. API Definition (AppSync GraphQL)
+
+The backend exposes a **GraphQL API via AppSync**, auto-generated from the `defineData` schema in §1. Resolvers, schema, and a fully typed client are generated by `npx ampx generate`.
+
+### Frontend Consumption
+
+```ts
+import { generateClient } from 'aws-amplify/api'
+import type { Schema } from '#/amplify/data/resource'
+
+const client = generateClient<Schema>()
+
+const { data: parks } = await client.models.Skatepark.list({
+  filter: { region: { eq: '90210' } },
+})
+
+// Real-time subscriptions (§8B) on the same client:
+client.models.Skatepark.observeQuery({
+  filter: { region: { eq: '90210' } },
+}).subscribe({ next: ({ items }) => /* ... */ })
+```
+
+### Generated Operations (excerpt)
+
+```graphql
+type Query {
+  getSkatepark(id: ID!): Skatepark
+  listSkateparks(filter: ModelSkateparkFilterInput, limit: Int): ModelSkateparkConnection
+  skateparksByRegion(region: String!, osmId: ModelStringKeyConditionInput): ModelSkateparkConnection
+  skateparksByGeohash(geohash: String!): ModelSkateparkConnection
+}
+
+type Mutation {
+  createSkatepark(input: CreateSkateparkInput!): Skatepark
+  updateSkatepark(input: UpdateSkateparkInput!): Skatepark
+  deleteSkatepark(input: DeleteSkateparkInput!): Skatepark
+}
+
+type Subscription {
+  onCreateSkatepark: Skatepark @aws_subscribe(mutations: ["createSkatepark"])
+  onUpdateSkatepark: Skatepark @aws_subscribe(mutations: ["updateSkatepark"])
+}
+```
+
+**Auth-gated mutations:** The `.authorization()` block in §1 produces AppSync auth directives. Cognito JWTs and the public API key are enforced by AppSync — no manual bearer-token plumbing.
+
+**Deviation from prior spec:** The original spec defined REST endpoints (`GET /skateparks`, `PATCH /skateparks/{id}`, etc.) via API Gateway with OpenAPI 3.0. Swapped to AppSync GraphQL because:
+
+- Amplify auto-generates resolvers, schema, and a typed client — eliminating manual OpenAPI/handler/SDK drift.
+- Auth-gated mutations are declared in `.authorization()`, not bespoke middleware.
+- Subscriptions (§8B) ride the same API — no separate WebSocket layer.
+
+The image upload endpoint from the original spec (`POST /skateparks/{id}` returning a presigned URL) is replaced by Amplify Storage (§3), which handles presigned URLs in the client SDK.
+
+If a REST endpoint is genuinely required for a non-Amplify consumer, expose a single Lambda Function URL via `defineFunction` — but GraphQL is the canonical interface.
+
+---
+
+## 3. Media Storage
+
+**File:** `amplify/storage/resource.ts`
+
+```ts
+export const storage = defineStorage({
+  name: 'skateparkMedia',
+  access: (allow) => ({
+    'public/skateparks/*': [
+      allow.guest.to(['read']),
+      allow.authenticated.to(['read']),
+      allow.groups(['admins']).to(['read', 'write', 'delete']),
+    ],
+    'private/uploads/{entity_id}/*': [
+      allow.entity('identity').to(['read', 'write', 'delete']),
+    ],
+  }),
+})
+```
+
+### Upload Flow
+
+1. Client calls `uploadData()` from `aws-amplify/storage` — the SDK obtains the presigned URL and streams the upload directly to S3.
+2. The S3 PUT triggers the `thumbnail-generator` `defineFunction` (S3 event source), which:
+   - Generates thumbnails (Sharp on an ARM64 Lambda layer).
+   - Issues an `updateSkatepark` mutation to set `imageUrl` on the parent record.
+
+**Deviation:** The prior spec described a manual presigned-URL Lambda plus a manual S3-trigger Lambda. Amplify Storage handles presigned URLs in the client SDK, so only the post-upload thumbnail handler remains as a `defineFunction`.
+
+---
+
+## 4. Authentication & Authorization
+
+**File:** `amplify/auth/resource.ts`
+
+```ts
+export const auth = defineAuth({
+  loginWith: {
+    email: true,
+    // externalProviders: { google: { ... } }, // optional, future
+  },
+  groups: ['admins', 'editors'],
+  userAttributes: {
+    preferredUsername: { mutable: true },
+  },
+})
+```
+
+### Authorization Tiers
+
+| Tier | Mechanism | Permissions |
+| :--- | :--- | :--- |
+| Anonymous | `allow.publicApiKey()` | Read skateparks |
+| Authenticated user | `allow.authenticated()` | Read; update whitelisted fields on `Skatepark` (e.g., `name`, `address`, `description`) |
+| `editors` group | `allow.groups(['editors'])` | All authenticated permissions; bypass trust-score gating |
+| `admins` group | `allow.groups(['admins'])` | Full CRUD on all models |
+
+Trust-score gating (referenced in §5) is implemented as either:
+
+a. A field-level resolver that consults a `UserProfile.trustScore` model before applying an edit, or
+b. A Lambda authorizer (`defineFunction` configured as a custom authorizer) for high-trust-only mutations.
+
+---
+
+## 5. Data Sourcing Strategy
+
+Metadata is sourced from three channels:
+
+1. **Initial seed (OSM):** `osm-sync-worker` (§6A) maps OSM tags (`note`, `description`, `wikimedia_commons`) into schema fields.
+2. **User contributions:** Authenticated users submit edits via `updateSkatepark` mutations. Field-level auth rules in §1 / §4 restrict which attributes contributors can modify; trust-score gating filters which edits apply immediately vs. queue for review.
+3. **Manual curation:** Admins use the same GraphQL API. An optional admin dashboard consumes the typed AppSync client.
+
+---
+
+## 6. ETL & Data Ingestion Pipeline
+
+A **Hybrid Ingestion Model** balances data freshness against latency.
+
+### A. Scheduled Sync — `osm-sync-worker`
+
+**File:** `amplify/functions/osm-sync-worker/resource.ts`
+
+```ts
+export const osmSyncWorker = defineFunction({
+  name: 'osm-sync-worker',
+  entry: './handler.ts',
+  schedule: 'every day',
+  timeoutSeconds: 300,
+  memoryMB: 512,
+})
+```
+
+Amplify provisions the EventBridge rule automatically. The handler issues Overpass QL queries for tracked metropolitan regions and writes via the IAM-signed AppSync admin client.
+
+### B. Search-Triggered Population — `region-populator`
+
+When a search hits a stale or empty region, the system serves fresh OSM data inline and asynchronously persists the new records.
+
+```ts
+export const regionPopulator = defineFunction({
+  name: 'region-populator',
+  entry: './handler.ts',
+  timeoutSeconds: 60,
+})
+```
+
+**Deviation:** The prior spec specified SQS as the async buffer. Replaced with **Lambda async destinations** (or AppSync pipeline resolvers invoking the populator) — fewer moving parts, native Amplify wiring, same delivery guarantees for current durability requirements. If retry / DLQ / fan-out grows complex, an SQS queue can be added via the CDK escape hatch later without re-architecting.
+
+### Sequence (User Search → Population)
+
+1. **User search** (`q=90210`) → AppSync `skateparksByRegion(region: "90210")`.
+2. **DynamoDB query** via generated resolver on the `region` GSI.
+3. **Decision logic** (custom resolver pipeline):
+   - **Found & fresh** (`updatedAt` within 7 days): return DynamoDB results. Target P95 < 50ms.
+   - **Stale or missing**: fetch from Overpass API, return results inline, fire-and-forget invocation of `region-populator`.
+4. **Asynchronous population:** `region-populator` issues `Skatepark.create` / `Skatepark.update` mutations via the IAM-signed admin client (which translates to `BatchWriteItem` under the hood).
+
+---
+
+## 7. Performance & Caching Contract
+
+- **L1 Cache (Client):** Generated AppSync client maintains an in-session normalized cache; reads hit memory before falling through to the network.
+- **L2 Cache (Edge):** Amplify Hosting fronts traffic with CloudFront automatically. SSR responses set `Cache-Control: public, max-age=3600` for unauthenticated routes.
+- **L3 Cache (AppSync):** AppSync server-side caching is enabled per-query via the `data` resource for read-heavy operations once hit-rate metrics justify the cost.
+- **Database performance:**
+  - Proximity searches use the `geohash` GSI generated from `secondaryIndexes` in §1.
+  - Region listings use the `region` GSI to avoid full scans.
+- **Latency targets:**
+  - P95 < 150ms for cache-hit reads.
+  - P95 < 500ms for cache-miss reads (includes Overpass round-trip).
+
+---
+
+## 8. Advanced Technical Enhancements
+
+### A. Semantic Search & Discovery (OpenSearch)
+
+**Amplify primitive:** none. **Approach:** CDK escape hatch.
+
+```ts
+// amplify/backend.ts
+const customStack = backend.createStack('AdvancedSearchStack')
+const domain = new opensearch.Domain(customStack, 'SkateparkSearch', {
+  version: opensearch.EngineVersion.OPENSEARCH_2_11,
+})
+```
+
+A DynamoDB Stream on `backend.data.resources.tables.Skatepark` feeds a `defineFunction` (Streams event source) that bulk-indexes into OpenSearch. Natural-language queries ("concrete bowl with pool coping and shade") use OpenSearch k-NN over text embeddings.
+
+Deferred until the description corpus is large enough to justify the operational cost — rough trigger: > 10k records, or sustained semantic-query traffic.
+
+### B. Real-time Communication
+
+**Amplify primitive:** AppSync **subscriptions** (first-class).
+
+Live check-ins, photo approvals, and any other real-time community feature are delivered through the same AppSync API as queries and mutations. No separate WebSocket infrastructure to operate.
+
+```ts
+client.models.Skatepark.onUpdate({
+  filter: { region: { eq: '90210' } },
+}).subscribe({ next: (park) => /* push to UI */ })
+```
+
+### C. Deep Observability & Monitoring
+
+- **AWS X-Ray:** Set `tracing: 'Active'` on each `defineFunction`. Amplify propagates the X-Ray context through AppSync resolvers automatically.
+- **CloudWatch Logs:** Automatic for every Amplify-managed Lambda; log groups are reachable via `backend.functions.<name>.resources.lambda`.
+- **CloudWatch RUM:** Not an Amplify primitive. Add via CDK escape hatch (`aws-cdk-lib/aws-rum`). Deferred until post-launch baseline metrics are needed.
+
+---
+
+## 9. Infrastructure as Code (IaC) Contract
+
+The entire stack is defined in **Amplify Gen 2** (TypeScript on top of AWS CDK) in the `amplify/` directory.
+
+- **Environments:** Per-branch Amplify environments. `npx ampx sandbox` provisions a personal dev backend; feature branches produce ephemeral staging environments; `main` deploys prod.
+- **Statelessness:** All resources defined as code. No manual AWS Console changes — drift surfaces at the next `cdk synth`.
+- **Deployment:** Amplify Hosting CI rebuilds and redeploys on every push. CDK-native rollback if a deploy fails health checks.
+
+### Project Layout
+
+```
+amplify/
+├── backend.ts                       # defineBackend({ auth, data, storage, ... })
+├── auth/resource.ts                 # defineAuth (Cognito)
+├── data/resource.ts                 # defineData (AppSync + DynamoDB)
+├── storage/resource.ts              # defineStorage (S3)
+└── functions/
+    ├── osm-sync-worker/             # scheduled OSM ingest
+    ├── region-populator/            # async region writeback
+    └── thumbnail-generator/         # S3-triggered image processing
 ```
 
 ---
 
-## 3. Media Storage (AWS S3)
+## 10. Implementation Milestones
 
-To handle skatepark images:
-1. **S3 Bucket:** `skatepark-finder-media` (Public Read, Private Write).
-2. **Upload Pipeline:** 
-   - Frontend requests a **Presigned URL** from a Lambda.
-   - Frontend uploads the image directly to S3.
-   - S3 Trigger (Lambda) generates thumbnails and updates the DynamoDB `image_url` attribute.
-
----
-
-## 4. Data Sourcing Strategy
-
-Metadata is sourced from three primary channels:
-1. **Initial Seed (OSM):** Map `description` from OSM tags like `note` or `description`. Map `image_url` from `wikimedia_commons` if available.
-2. **User Contributions:** Allow registered users to update fields. Updates are validated via a `PendingEdits` table or applied directly if user trust score is high.
-3. **Manual Curation:** Admin overrides via a protected dashboard.
-
----
-
-## 5. ETL & Data Ingestion Pipeline
-
-The system uses a **Hybrid Ingestion Model** to balance data freshness with performance.
-
-### A. Scheduled Sync (The "Maintenance" Worker)
-- **Trigger:** EventBridge Rule (Every 24 hours).
-- **Purpose:** Refreshes known high-traffic areas and cleans up stale data.
-- **Query:** Overpass QL targeting global or major metropolitan areas.
-
-### B. Search-Triggered Population (The "Just-In-Time" Worker)
-To ensure the database is populated dynamically based on user demand:
-1. **Cache Miss/Stale Check:** When a user searches a region, the `Search Lambda` checks if the `REGION` partition exists and if `last_updated` is within the threshold (e.g., 7 days).
-2. **On-Demand Fetch:** If data is missing or stale, the Lambda fetches fresh data from the Overpass API.
-3. **Lazy Write:**
-   - The user receives the response immediately (using the fresh OSM data).
-   - An asynchronous process (via Lambda Destination or SQS) writes the new/updated records to DynamoDB for future users.
-
----
-
-## 4. Search-Triggered Population Logic (Sequence)
-
-1. **User Search** (`q=90210`) -> `Search Lambda`.
-2. **DynamoDB Query:** `SELECT * FROM Skateparks WHERE PK = 'REGION#90210'`.
-3. **Decision Logic:**
-   - **If Found & Fresh:** Return results (Sub-50ms).
-   - **If Found but Stale** OR **Not Found:**
-     - Fetch from Overpass API.
-     - Return results to User.
-     - Dispatch `UpdateDynamoDB` event to SQS/EventBridge.
-4. **Asynchronous Population:** `osm-sync-worker` consumes the event and performs a `BatchWriteItem` to update the DynamoDB table.
-
----
-
-## 5. Performance & Caching Contract
-
-- **L1 Cache (Client):** `Cache-Control: public, max-age=3600` (1 hour) for search results.
-- **L2 Cache (Edge):** CloudFront to cache GET requests based on query string parameters.
-- **Database Performance:**
-  - Proximity searches MUST use the `geohash` attribute via a Global Secondary Index (GSI) to avoid full table scans.
-  - Target Latency: P95 < 150ms for search queries.
-
-## 6. Advanced Technical Enhancements
-
-### A. Semantic Search & Discovery (OpenSearch)
-As the description and review data grows, basic keyword search is insufficient.
-- **Integration:** Synchronize DynamoDB streams to an **Amazon OpenSearch** cluster.
-- **Feature Search:** Enable natural language queries like *"Concrete bowl with pool coping and shade"* using vector embeddings.
-
-### B. Real-time Communication (AWS AppSync / WebSockets)
-For "Live Check-ins" and community features:
-- **GraphQL Subscriptions:** Use AWS AppSync to push real-time updates to the frontend when a user checks in or a new photo is approved.
-- **Advantage:** Reduces API polling and provides a "live" feel to the application.
-
-### C. Deep Observability & Monitoring
-- **AWS X-Ray:** Implement distributed tracing to identify bottlenecks in the Lambda-to-DynamoDB pipeline.
-- **CloudWatch RUM (Real User Monitoring):** Capture client-side performance metrics (Core Web Vitals) and errors directly from the user's browser.
-
----
-
-## 7. Infrastructure as Code (IaC) Contract
-
-The entire stack MUST be defined in **AWS CDK (TypeScript)**.
-- **Environments:** Strict parity between `dev`, `staging`, and `prod`.
-- **Statelessness:** No manual changes in the AWS Console.
-- **Deployment:** GitHub Actions pipeline to run `cdk deploy` after successful testing.
-
----
-
-## 8. Implementation Milestones
-
-1. **Sprint 1:** Define CloudFormation/SAM template for DynamoDB table and GSI.
-2. **Sprint 2:** Implement `osm-sync-worker` Lambda with Overpass API integration.
-3. **Sprint 3:** Deploy API Gateway and Search Lambda with geohash filtering logic.
-4. **Sprint 4:** Implement Frontend switch from `osmService.ts` to `apiService.ts`.
+| Sprint | Deliverable | Primitives |
+| :--- | :--- | :--- |
+| 1 | `defineAuth` (Cognito + `admins`/`editors` groups), `defineData` with `Skatepark` model + `region` / `geohash` GSIs | `auth`, `data` |
+| 2 | `osm-sync-worker` Lambda with daily schedule + Overpass integration | `functions` (managed EventBridge) |
+| 3 | `region-populator` Lambda + custom AppSync resolver pipeline for stale-region detection and async invocation | `functions`, AppSync custom resolvers |
+| 4 | `defineStorage` for `skatepark-media` bucket + `thumbnail-generator` S3-triggered Lambda | `storage`, `functions` |
+| 5 | Frontend swap: `src/services/osmService.ts` → `generateClient<Schema>()` from `aws-amplify/api`; wire subscriptions for live updates | `aws-amplify/api` |
+| 6 *(deferred)* | OpenSearch via CDK escape hatch once semantic search is justified | CDK custom stack |
