@@ -10,12 +10,14 @@ export function getRouter() {
     defaultPreloadStaleTime: 0,
   })
 
-  router.subscribe('onResolved', (event) => {
-    const href = event?.resolvedLocation?.href
-    if (href) {
-      trackPageView(href)
-    }
-  })
+  if (typeof window !== 'undefined') {
+    router.subscribe('onResolved', (event) => {
+      const href = event?.resolvedLocation?.href
+      if (href) {
+        trackPageView(href)
+      }
+    })
+  }
 
   return router
 }

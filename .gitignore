@@ -9,5 +9,8 @@ dist-ssr
 .wrangler
 .output
 .vinxi
+.amplify-hosting
+.amplify
+amplify_outputs.json
 .vscode
 __unconfig*
