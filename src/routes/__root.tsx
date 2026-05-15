@@ -1,4 +1,4 @@
-import { Outlet, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Outlet, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { ThemeProvider, CssBaseline, Container } from '@mui/material'
 import { CacheProvider } from '@emotion/react'
@@ -15,6 +15,7 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <CacheProvider value={clientSideEmotionCache}>
+      <HeadContent />
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <SkateparkProvider>

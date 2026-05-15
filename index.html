@@ -2,13 +2,94 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Skatepark Finder | Find Skateparks Near You</title>
-    <meta name="description" content="The ultimate tool to find skateparks and local shred spots near you. Search by zipcode, address, or use your current location." />
+    <meta name="theme-color" content="#000000" />
+
+    <title>Skatepark Finder - Find Skateparks Near Me | sk8finder.cloud</title>
+    <meta name="description" content="Skatepark Finder helps you find skateparks near you. Search by zipcode, city, or address, or use your current location to discover local skateparks, plazas, and DIY shred spots worldwide." />
+    <meta name="keywords" content="skateparks, skateparks near me, skatepark finder, find skateparks, local skateparks, skate spots, skateboard parks, skate plazas, DIY skate spots, skatepark map, skatepark locator" />
+    <meta name="author" content="Skatepark Finder" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <meta name="googlebot" content="index, follow" />
+
+    <link rel="canonical" href="https://sk8finder.cloud/" />
+
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Skatepark Finder" />
+    <meta property="og:title" content="Skatepark Finder - Find Skateparks Near Me" />
+    <meta property="og:description" content="Find skateparks near you. Search by zipcode, city, or address to discover local skateparks, plazas, and DIY shred spots worldwide." />
+    <meta property="og:url" content="https://sk8finder.cloud/" />
+    <meta property="og:image" content="https://sk8finder.cloud/skatepark-finder.png" />
+    <meta property="og:image:alt" content="Skatepark Finder - Find Skateparks Near You" />
+    <meta property="og:locale" content="en_US" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Skatepark Finder - Find Skateparks Near Me" />
+    <meta name="twitter:description" content="Find skateparks near you. Search by zipcode, city, or address to discover local skateparks, plazas, and DIY shred spots worldwide." />
+    <meta name="twitter:image" content="https://sk8finder.cloud/skatepark-finder.png" />
+    <meta name="twitter:image:alt" content="Skatepark Finder - Find Skateparks Near You" />
+
+    <link rel="preconnect" href="https://overpass-api.de" />
+    <link rel="preconnect" href="https://nominatim.openstreetmap.org" />
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://sk8finder.cloud/#website",
+          "url": "https://sk8finder.cloud/",
+          "name": "Skatepark Finder",
+          "description": "Find skateparks near you. Search by zipcode, city, or address to discover local skateparks, plazas, and DIY shred spots worldwide.",
+          "inLanguage": "en-US",
+          "potentialAction": {
+            "@type": "SearchAction",
+            "target": {
+              "@type": "EntryPoint",
+              "urlTemplate": "https://sk8finder.cloud/?q={search_term_string}"
+            },
+            "query-input": "required name=search_term_string"
+          }
+        },
+        {
+          "@type": "WebApplication",
+          "@id": "https://sk8finder.cloud/#webapp",
+          "name": "Skatepark Finder",
+          "url": "https://sk8finder.cloud/",
+          "applicationCategory": "TravelApplication",
+          "operatingSystem": "Any",
+          "browserRequirements": "Requires JavaScript. Requires HTML5.",
+          "description": "A web application to find skateparks, plazas, and DIY shred spots near you, powered by OpenStreetMap data.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://sk8finder.cloud/#organization",
+          "name": "Skatepark Finder",
+          "url": "https://sk8finder.cloud/",
+          "logo": "https://sk8finder.cloud/skatepark-finder.png"
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
     <div id="app"></div>
+    <noscript>
+      <h1>Skatepark Finder - Find Skateparks Near You</h1>
+      <p>Skatepark Finder helps you find skateparks near you. Search by zipcode, city, or address to discover local skateparks, plazas, and DIY shred spots worldwide. Please enable JavaScript to use the interactive search.</p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
