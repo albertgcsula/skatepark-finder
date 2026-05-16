@@ -12,7 +12,7 @@ const USER_AGENT = 'SkateparkFinder-Ingest/1.0 (https://sk8finder.cloud; contact
 
 const PRESETS = {
   nyc: { south: 40.4774, west: -74.2591, north: 40.9176, east: -73.7004, label: 'New York City' },
-  la: { south: 33.7037, west: -118.6682, north: 34.3373, east: -118.1553, label: 'Los Angeles' },
+  la: { south: 33.6500, west: -118.9500, north: 34.3373, east: -117.6500, label: 'Los Angeles County' },
   portland: { south: 45.4327, west: -122.8367, north: 45.6529, east: -122.4717, label: 'Portland OR' },
   brooklyn: { south: 40.5707, west: -74.0419, north: 40.7395, east: -73.8334, label: 'Brooklyn NY' },
   sf: { south: 37.2000, west: -122.5500, north: 37.9500, east: -121.8500, label: 'SF Bay Area' },
@@ -122,7 +122,7 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
 
 // Given an unnamed skatepark at (lat,lng), find the nearest named park-like
 // feature within `maxMeters`. Returns the OSM tags object or null.
-function findEnclosingParkName(lat, lng, namedFeatures, maxMeters = 100) {
+function findEnclosingParkName(lat, lng, namedFeatures, maxMeters = 200) {
   let best = null
   let bestDist = Infinity
   for (const f of namedFeatures) {

@@ -37,7 +37,7 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 
 async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Promise<Skatepark[]> {
   if (!client) return []
-  // Phase 2b: list all and filter client-side. At 179 records this is trivial.
+  // Phase 2b: list all and filter client-side. At ~500 records this is trivial.
   // When the DB grows we'll switch to geohash-bucket queries.
   let nextToken: string | undefined | null = undefined
   const all: Array<Schema['Skatepark']['type']> = []
@@ -51,9 +51,10 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
     nextToken = page.nextToken
   } while (nextToken)
 
-  const enriched: Skatepark[] = all
+  return all
     .map((r) => ({
-      id: r.id,
+      // Use osmId as the canonical id so DDB and OSM records dedupe in the merge step.
+      id: r.osmId,
       lat: r.lat,
       lon: r.lng,
       name: r.name,
@@ -67,31 +68,48 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
       source: 'ddb' as const,
     }))
     .filter((p) => (p.distance ?? Infinity) <= radiusMiles)
-    .sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
-
-  return enriched
 }
 
 /**
- * Hybrid query: DynamoDB first (enriched data), OSM fallback if no DDB results
- * within the search radius.
+ * Union DynamoDB and OSM results, deduped by OSM id. DDB records take
+ * precedence over OSM (richer fields). Falls back to OSM-only when Amplify
+ * isn't configured (e.g., dev without `ampx sandbox`).
+ *
+ * Why union and not "DDB first, OSM fallback if empty": with ingest coverage
+ * limited to specific bbox regions, a search near the edge of an ingested
+ * region (e.g., Montebello CA, just outside our LA bbox) returns a few
+ * nearby DDB records but misses the parks actually closest to the user. By
+ * querying both sources in parallel, results from non-ingested areas
+ * surface alongside the curated DDB data.
  */
 export async function fetchSkateparksHybrid(
   lat: number,
   lon: number,
   radiusMiles: number,
 ): Promise<Skatepark[]> {
-  if (amplifyConfigured) {
-    try {
-      const ddbResults = await fetchFromDdb(lat, lon, radiusMiles)
-      if (ddbResults.length > 0) {
-        console.log(`[skateparkService] DDB hit: ${ddbResults.length} records`)
-        return ddbResults
-      }
-      console.log('[skateparkService] DDB empty for region, falling back to OSM')
-    } catch (err) {
-      console.warn('[skateparkService] DDB query failed, falling back to OSM:', err)
-    }
-  }
-  return fetchSkateparksOsm(lat, lon, radiusMiles)
+  const ddbPromise = amplifyConfigured
+    ? fetchFromDdb(lat, lon, radiusMiles).catch((err) => {
+        console.warn('[skateparkService] DDB query failed, continuing with OSM only:', err)
+        return [] as Skatepark[]
+      })
+    : Promise.resolve([] as Skatepark[])
+
+  // OSM errors are allowed to propagate — there's no further fallback and the
+  // SkateparkContext catches them to display a user-visible error.
+  const [ddbResults, osmResults] = await Promise.all([
+    ddbPromise,
+    fetchSkateparksOsm(lat, lon, radiusMiles),
+  ])
+
+  // Merge: start with OSM, then overlay DDB entries (DDB wins on duplicate
+  // osmId because it has enriched fields like imageUrl/description).
+  const byId = new Map<string, Skatepark>()
+  for (const p of osmResults) byId.set(p.id, p)
+  for (const p of ddbResults) byId.set(p.id, p)
+
+  const merged = [...byId.values()].sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+  console.log(
+    `[skateparkService] merged: ${merged.length} total (${ddbResults.length} DDB, ${osmResults.length} OSM)`,
+  )
+  return merged
 }

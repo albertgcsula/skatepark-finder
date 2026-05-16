@@ -4,6 +4,18 @@ This document defines the formal contract and architecture for the Skatepark Fin
 
 **Platform:** AWS Amplify Gen 2 (built on AWS CDK). Backend resources are defined as code in the `amplify/` directory. Amplify primitives (`defineAuth`, `defineData`, `defineStorage`, `defineFunction`) are used wherever they fit. CDK escape hatches via `backend.createStack(...)` are reserved for resources Amplify does not natively support — currently OpenSearch (§8A) and CloudWatch RUM (§8C).
 
+## Implementation Status (current state)
+
+| Component | Status |
+| :--- | :--- |
+| `defineAuth` — Cognito + admins/editors groups | Deployed (sandbox + prod), unused by frontend yet |
+| `defineData` — Skatepark model + region/geohash GSIs | **Deployed and seeded** with ~472 records across 11 US regions |
+| `defineStorage` — S3 bucket for media | **Not yet provisioned.** App uses Wikimedia/external image URLs directly via `imageUrl` field |
+| Ingest pipeline | **Implemented as local Node.js CLI** (`scripts/ingest.mjs`), not yet a Lambda. See §6A |
+| Search-triggered population | **Deferred (Phase 2c).** Frontend uses static OSM fallback when DDB returns 0 results |
+| Frontend swap to AppSync client | **Deployed** via hybrid service (`src/services/skateparkService.ts`) |
+| Auth tiers in §4 | **Temporarily collapsed** to `allow.publicApiKey()` only for sandbox/seed access. See §4 for `FIXME(prod)` |
+
 ---
 
 ## 1. Domain Model & Data Schema
@@ -16,26 +28,33 @@ The backend uses **AppSync + DynamoDB** provisioned by Amplify `defineData`. Eac
 const schema = a.schema({
   Skatepark: a
     .model({
-      osmId: a.string().required(),
+      osmId: a.string().required(),         // e.g., "way/12345" — type/id from OSM
+      osmType: a.string(),                  // "node" | "way" | "relation"
       name: a.string().required(),
       description: a.string(),
       imageUrl: a.url(),
+      imageLicense: a.string(),             // CC license (e.g., "CC BY-SA 4.0") when from Wikimedia
+      imageAttribution: a.string(),         // Artist / photographer when available
+      imageSource: a.string(),              // Provenance — "wikipedia" | "wikimedia-geosearch:..." | etc.
       lat: a.float().required(),
       lng: a.float().required(),
       address: a.string(),
-      surface: a.enum(['concrete', 'wood', 'asphalt', 'metal']),
-      type: a.enum(['skate_park', 'pump_track', 'bowl']),
-      geohash: a.string().required(),
-      region: a.string().required(), // zipcode or city slug, used for partitioned queries
+      website: a.url(),                     // Operator/city park URL when tagged in OSM
+      surface: a.string(),                  // Free-form; mostly null since OSM tags this inconsistently
+      geohash: a.string().required(),       // 9-char (ngeohash); narrower than the 12 in original spec
+      region: a.string().required(),        // city slug (e.g., "nyc", "la", "portland", "sf")
     })
     .secondaryIndexes((index) => [
       index('region').sortKeys(['osmId']),
       index('geohash'),
     ])
     .authorization((allow) => [
-      allow.publicApiKey().to(['read']),
-      allow.authenticated().to(['read', 'update']),
-      allow.groups(['admins']).to(['create', 'read', 'update', 'delete']),
+      // FIXME(prod): tighten before going live. See §4 — single auth provider
+      // chosen for sandbox to avoid an Amplify Gen 2 quirk where mixing
+      // publicApiKey + authenticated + groups failed to propagate
+      // @aws_api_key directives to optional fields, surfacing as
+      // "Unauthorized on [imageUrl, description, ...]" errors at read time.
+      allow.publicApiKey(),
     ]),
 })
 ```
@@ -44,17 +63,24 @@ const schema = a.schema({
 
 | Attribute | Type | Constraint |
 | :--- | :--- | :--- |
-| `osmId` | String | Required, unique per region |
-| `name` | String | Required, max 100 chars (enforced in resolver) |
-| `description` | String | Max 1000 chars |
-| `imageUrl` | URL | Validated by AppSync scalar |
-| `lat` | Float | -90 to 90 |
-| `lng` | Float | -180 to 180 |
-| `address` | String | Max 200 chars |
-| `geohash` | String | 12-char, GSI-indexed |
-| `region` | String | Partition analog (zipcode or city slug) |
+| `osmId` | String | Required, unique per region. Format: `<osmType>/<id>` |
+| `osmType` | String | "node" \| "way" \| "relation" |
+| `name` | String | Required. Falls back to `"Unnamed Skatepark"` only when no source produces a name |
+| `description` | String | Free-form; sourced from OSM `description` tag, Wikipedia extract, or enclosing park's description |
+| `imageUrl` | URL | External URL (Wikimedia Commons in most cases); validated by AppSync scalar |
+| `imageLicense` | String | Optional, populated for Wikimedia images |
+| `imageAttribution` | String | Optional photographer/artist credit |
+| `imageSource` | String | Provenance tag — see ingest §6A |
+| `lat`, `lng` | Float | -90 to 90 / -180 to 180 |
+| `address` | String | Derived from OSM `addr:*` tags or Nominatim reverse geocode |
+| `website` | URL | Optional, from OSM `website` tag |
+| `surface` | String | Optional, free-form (OSM tags vary too widely for an enum here) |
+| `geohash` | String | 9-char (`ngeohash`); GSI-indexed |
+| `region` | String | City slug — currently one of `nyc`, `la`, `portland`, `brooklyn`, `sf`, `seattle`, `austin`, `chicago`, `denver`, `sandiego`, `boston`, `philly` |
 
 **Deviation from prior spec:** The original spec called for a single-table design (`PK=REGION#zip`, `SK=SKATEPARK#osm_id`). Amplify `defineData` generates per-model tables. Per-model is accepted for the trade of: free typed client generation, free subscriptions, free auth-rule enforcement, and zero resolver code. If write throughput or cost ever forces a revisit, the underlying CDK construct is reachable via `backend.data.resources.tables.Skatepark` for targeted overrides without abandoning the Amplify project.
+
+The `surface` and `type` enums in the original draft were dropped — OSM tags are too inconsistent (e.g., `surface=asphalt;concrete`, `surface=paved`) to map cleanly to a closed enum. Stored as free strings; will tighten when curation data is available.
 
 ---
 
@@ -118,7 +144,23 @@ If a REST endpoint is genuinely required for a non-Amplify consumer, expose a si
 
 ## 3. Media Storage
 
-**File:** `amplify/storage/resource.ts`
+### Current state: direct external URLs (no S3 yet)
+
+Images are referenced by **external URL** stored in the `Skatepark.imageUrl` field. The ingest pipeline (§6A) populates this from:
+
+- OSM `image` tag (rare; ~0% of records use it)
+- OSM `wikimedia_commons` tag → resolved to a Wikimedia Commons file URL
+- Wikipedia article lead image (when OSM has a `wikipedia` tag)
+- Wikidata P18 (image property)
+- Wikimedia Commons geosearch — nearby photos with skate-keyword filter
+
+The frontend's `SkateparkCard` renders these directly with `<CardMedia component="img" src={imageUrl}>`. License and attribution from Wikimedia metadata are stored in `imageLicense` and `imageAttribution` and displayed in the card footer.
+
+**Why no S3 yet:** the current image set is small (~35 images across 472 records), all hosted by Wikimedia, all CC-licensed and hotlinkable. The cost of provisioning an S3 bucket + thumbnail pipeline isn't justified until user uploads or hotlinking becomes a problem.
+
+### Future plan: when we add user uploads
+
+When user-contributed photos become a feature (per `FRONTEND_SPEC.md` roadmap), introduce `defineStorage`:
 
 ```ts
 export const storage = defineStorage({
@@ -136,14 +178,12 @@ export const storage = defineStorage({
 })
 ```
 
-### Upload Flow
+Upload flow becomes:
 
-1. Client calls `uploadData()` from `aws-amplify/storage` — the SDK obtains the presigned URL and streams the upload directly to S3.
-2. The S3 PUT triggers the `thumbnail-generator` `defineFunction` (S3 event source), which:
-   - Generates thumbnails (Sharp on an ARM64 Lambda layer).
-   - Issues an `updateSkatepark` mutation to set `imageUrl` on the parent record.
+1. Client calls `uploadData()` from `aws-amplify/storage` — SDK obtains a presigned URL and streams the upload directly to S3.
+2. The S3 PUT triggers a `thumbnail-generator` `defineFunction` (S3 event source) that generates thumbnails (Sharp on an ARM64 Lambda layer) and issues an `updateSkatepark` mutation to set `imageUrl` on the parent record.
 
-**Deviation:** The prior spec described a manual presigned-URL Lambda plus a manual S3-trigger Lambda. Amplify Storage handles presigned URLs in the client SDK, so only the post-upload thumbnail handler remains as a `defineFunction`.
+This deferred sprint (originally Sprint 4 in §10) is unblocked whenever uploads become a priority.
 
 ---
 
@@ -164,7 +204,7 @@ export const auth = defineAuth({
 })
 ```
 
-### Authorization Tiers
+### Authorization Tiers — design target
 
 | Tier | Mechanism | Permissions |
 | :--- | :--- | :--- |
@@ -177,6 +217,16 @@ Trust-score gating (referenced in §5) is implemented as either:
 
 a. A field-level resolver that consults a `UserProfile.trustScore` model before applying an edit, or
 b. A Lambda authorizer (`defineFunction` configured as a custom authorizer) for high-trust-only mutations.
+
+### Current sandbox state — `FIXME(prod)`
+
+The model auth (see §1) is **currently set to `allow.publicApiKey()` only** — the public API key has full CRUD. This was a deliberate sandbox-mode collapse because mixing `publicApiKey` + `authenticated` + `groups([...])` in a single `.authorization()` block triggered an Amplify Gen 2 quirk: optional fields (`imageUrl`, `description`, etc.) did not get the `@aws_api_key` directive propagated, causing reads to fail with `Unauthorized on [imageUrl, description, ...]` even though the model-level rule looked correct.
+
+Before going to production:
+
+1. Split read access (`publicApiKey().to(['read'])`) from write access (`groups(['admins']).to(['create','update','delete'])`).
+2. Test field-level read access on optional fields after the change; if the directive issue resurfaces, add explicit field-level `.authorization()` blocks on those fields.
+3. Move seed-script writes behind Cognito admin sign-in or a `defineFunction` with `allow.resource()` IAM auth (instead of the public API key).
 
 ---
 
@@ -194,11 +244,40 @@ Metadata is sourced from three channels:
 
 A **Hybrid Ingestion Model** balances data freshness against latency.
 
-### A. Scheduled Sync — `osm-sync-worker`
+### A. Current state — local ingest CLI (not yet a Lambda)
 
-**File:** `amplify/functions/osm-sync-worker/resource.ts`
+**File:** `scripts/ingest.mjs` (Node.js ESM, run with `npm run ingest -- --scope=<region>`).
+
+The ingest is currently a **local CLI script**, not a deployed `defineFunction`. The Lambda-ification (with EventBridge schedule) is deferred until manual ingest cadence becomes a bottleneck. The script's enrichment logic is the design source of truth and will move verbatim into a Lambda handler when promoted.
+
+**Enrichment pipeline (per record):**
+
+1. **Overpass query** — one request per region bbox returns:
+   - All skateparks (`leisure=skate_park`, `sport=skateboard`)
+   - All named `leisure=park|playground|recreation_ground|garden|nature_reserve` features (used for enclosing-park name resolution).
+2. **OSM tag harvest** — name (with `name`/`official_name`/`alt_name`/`operator`/`addr:street` fallback chain), description, image, website, address tags.
+3. **Wikipedia REST** — for records with `wikipedia` tag: article summary + lead image + page URL.
+4. **Wikimedia Commons** — for records with `wikimedia_commons` tag (file or category): image URL + license + attribution.
+5. **Wikidata** — for records with `wikidata` tag: P18 image, P31 instance-of, en labels/descriptions.
+6. **Wikimedia Commons geosearch** — last-resort image lookup; only accepts files whose name matches a skate keyword (`skate|skatepark|skateboard|plaza|pump.?track|bowl`). Filters out generic "nearest photo" matches (cars, cafes, etc.).
+7. **Commons-filename name mining** — when the geosearch match has a skate-relevant title like "Far Rockaway Skatepark - 2019.jpg", parses out a park name.
+8. **Enclosing-park name resolution** — for records still without a name, finds the nearest named `leisure=park|playground|...` feature within 100m (from step 1's bulk fetch) and derives a name like "Tompkins Square Park Skatepark". Sourced because OSM mappers commonly tag the enclosing park but not the skatepark element itself.
+9. **Nominatim reverse geocode** — final fallback for missing addresses or names.
+
+**Provenance tracking:** every enriched record carries a `sources: { name, description, address }` map and an `imageSource` string so we can audit which API produced which field.
+
+**Rate-limit handling:** Nominatim is rate-limited to 1 req/sec per IP via a serialized queue. Wikipedia/Wikimedia have generous limits and are called inline. Overpass is hit once per region (one bbox query returns all needed data).
+
+**Region presets** (current set, in `PRESETS` constant): `nyc`, `brooklyn`, `la`, `portland`, `sf`, `seattle`, `austin`, `chicago`, `denver`, `sandiego`, `boston`, `philly`. Arbitrary bboxes accepted via `--bbox=south,west,north,east`.
+
+**Output:** `scripts/output/<scope>.json` — gitignored, consumed by `scripts/seed.mjs` to write into DynamoDB.
+
+### A.bis. Future: schedule as Lambda
+
+When manual ingest becomes a bottleneck, promote `scripts/ingest.mjs` to:
 
 ```ts
+// amplify/functions/osm-sync-worker/resource.ts
 export const osmSyncWorker = defineFunction({
   name: 'osm-sync-worker',
   entry: './handler.ts',
@@ -208,11 +287,15 @@ export const osmSyncWorker = defineFunction({
 })
 ```
 
-Amplify provisions the EventBridge rule automatically. The handler issues Overpass QL queries for tracked metropolitan regions and writes via the IAM-signed AppSync admin client.
+Amplify will provision the EventBridge rule. Handler will use the same enrichment pipeline and write via the IAM-signed AppSync admin client (using `allow.resource(osmSyncWorker).to(['create','update'])` on the Skatepark model).
 
-### B. Search-Triggered Population — `region-populator`
+### B. Search-Triggered Population — `region-populator` (Phase 2c — deferred)
 
-When a search hits a stale or empty region, the system serves fresh OSM data inline and asynchronously persists the new records.
+**Not yet implemented.** Search outside an ingested region (e.g., user searches "Boston MA" with only NYC/LA/Portland/etc. in DDB) currently falls back to OSM Overpass at query time without writing back. The user sees results; the next user searching the same region also hits OSM.
+
+The frontend implements the **read-side** of the hybrid pattern today (see §6.C below). The write-back side — persisting the OSM-derived records to DynamoDB so subsequent queries are fast — is the remaining work for Phase 2c.
+
+**Target design when implemented:**
 
 ```ts
 export const regionPopulator = defineFunction({
@@ -222,16 +305,34 @@ export const regionPopulator = defineFunction({
 })
 ```
 
-**Deviation:** The prior spec specified SQS as the async buffer. Replaced with **Lambda async destinations** (or AppSync pipeline resolvers invoking the populator) — fewer moving parts, native Amplify wiring, same delivery guarantees for current durability requirements. If retry / DLQ / fan-out grows complex, an SQS queue can be added via the CDK escape hatch later without re-architecting.
+**Deviation from the original spec:** SQS as the async buffer is dropped in favor of **Lambda async destinations** (or AppSync pipeline resolvers invoking the populator) — fewer moving parts, native Amplify wiring, same delivery guarantees for current durability requirements. If retry / DLQ / fan-out grows complex, SQS can be added via the CDK escape hatch later.
 
-### Sequence (User Search → Population)
+**Target sequence:**
 
-1. **User search** (`q=90210`) → AppSync `skateparksByRegion(region: "90210")`.
-2. **DynamoDB query** via generated resolver on the `region` GSI.
-3. **Decision logic** (custom resolver pipeline):
-   - **Found & fresh** (`updatedAt` within 7 days): return DynamoDB results. Target P95 < 50ms.
-   - **Stale or missing**: fetch from Overpass API, return results inline, fire-and-forget invocation of `region-populator`.
-4. **Asynchronous population:** `region-populator` issues `Skatepark.create` / `Skatepark.update` mutations via the IAM-signed admin client (which translates to `BatchWriteItem` under the hood).
+1. **User search** (`q=90210`) → frontend's hybrid service.
+2. **DynamoDB list+filter** via the AppSync `list` query (current frontend behavior).
+3. **Decision logic**:
+   - **Found**: return DynamoDB results (current behavior).
+   - **Empty**: fetch from Overpass inline, **and** fire-and-forget invocation of `region-populator` (new — currently missing).
+4. **Asynchronous population:** `region-populator` runs the ingest enrichment pipeline (§6A) for the bbox covering the user's search, then writes via the IAM-signed admin client.
+
+### C. Current state — frontend hybrid query (read-side only)
+
+**File:** `src/services/skateparkService.ts` (deployed).
+
+```ts
+export async function fetchSkateparksHybrid(lat, lon, radiusMiles) {
+  if (amplifyConfigured) {
+    const ddbResults = await fetchFromDdb(lat, lon, radiusMiles)
+    if (ddbResults.length > 0) return filterNamed(ddbResults)
+  }
+  return filterNamed(await fetchSkateparksOsm(lat, lon, radiusMiles))
+}
+```
+
+- **DDB query strategy:** full-table scan + client-side haversine filter. Scales fine through ~5k records; beyond that, switch to a `geohash`-bucket query using the GSI in §1.
+- **Fallback:** if DDB returns 0 records (e.g., search outside an ingested region) or the Amplify client isn't configured (e.g., dev build without `npx ampx sandbox`), the service falls through to `osmService.fetchSkateparks` against Overpass live.
+- **Result filter:** `filterNamed` hides records whose name is `"Unnamed Skatepark"` (the sentinel for "no source produced a name"). Drops ~25% of records but every remaining card is meaningful. Filter is intentionally per-render; un-name-able records remain in DDB so the ingest can backfill names later without re-create churn.
 
 ---
 
@@ -313,11 +414,23 @@ amplify/
 
 ## 10. Implementation Milestones
 
-| Sprint | Deliverable | Primitives |
+| Sprint | Deliverable | Status |
 | :--- | :--- | :--- |
-| 1 | `defineAuth` (Cognito + `admins`/`editors` groups), `defineData` with `Skatepark` model + `region` / `geohash` GSIs | `auth`, `data` |
-| 2 | `osm-sync-worker` Lambda with daily schedule + Overpass integration | `functions` (managed EventBridge) |
-| 3 | `region-populator` Lambda + custom AppSync resolver pipeline for stale-region detection and async invocation | `functions`, AppSync custom resolvers |
-| 4 | `defineStorage` for `skatepark-media` bucket + `thumbnail-generator` S3-triggered Lambda | `storage`, `functions` |
-| 5 | Frontend swap: `src/services/osmService.ts` → `generateClient<Schema>()` from `aws-amplify/api`; wire subscriptions for live updates | `aws-amplify/api` |
-| 6 *(deferred)* | OpenSearch via CDK escape hatch once semantic search is justified | CDK custom stack |
+| 1 | `defineAuth` (Cognito + `admins`/`editors` groups), `defineData` with `Skatepark` model + `region` / `geohash` GSIs | **Done** — sandbox + prod deployed |
+| 2 | OSM ingest with multi-source enrichment | **Done as local CLI** (`scripts/ingest.mjs`); Lambda promotion deferred |
+| 3 | `region-populator` Lambda + custom AppSync resolver pipeline for stale-region detection and async invocation | **Phase 2c — pending** |
+| 4 | `defineStorage` for `skatepark-media` bucket + `thumbnail-generator` S3-triggered Lambda | **Pending** — gated by user-upload feature in `FRONTEND_SPEC.md` |
+| 5 | Frontend swap: `src/services/osmService.ts` → AppSync client via hybrid service | **Done** — `src/services/skateparkService.ts` deployed |
+| 6 *(deferred)* | OpenSearch via CDK escape hatch once semantic search is justified | Pending — triggers at >10k records or sustained semantic-query traffic |
+| 7 *(quality)* | Tighten model auth from `allow.publicApiKey()` to the tiered design in §4 | Pending — see §4 `FIXME(prod)` |
+| 8 *(data quality)* | Yelp Fusion API enrichment (free 5k req/day) — biggest single unlock for image coverage | Pending — registered as a deferred note |
+
+### Data coverage snapshot
+
+| Metric | Count |
+| :--- | :--- |
+| Total records in prod DynamoDB | ~472 |
+| Regions seeded | 11 (`nyc`, `la`, `portland`, `sf`, `seattle`, `austin`, `chicago`, `denver`, `sandiego`, `boston`, `philly`) |
+| Named (post enclosing-park resolution) | 354 (~75%) |
+| Records with an image | 35 (~7%) |
+| Records with a description | ~20 |
