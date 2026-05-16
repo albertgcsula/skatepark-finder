@@ -84,6 +84,10 @@ function rateLimit(fn, minIntervalMs) {
 
 async function fetchOverpass({ south, west, north, east }) {
   // bbox order in Overpass: south,west,north,east
+  // We pull two sets in one query:
+  // 1) Skateparks (target records)
+  // 2) Named leisure features (park/playground/etc.) — used as name fallback
+  //    for skateparks the mapper didn't tag but whose enclosing park is named.
   const query = `
     [out:json][timeout:60];
     (
@@ -93,6 +97,8 @@ async function fetchOverpass({ south, west, north, east }) {
       node["sport"="skateboard"](${south},${west},${north},${east});
       way["sport"="skateboard"](${south},${west},${north},${east});
       relation["sport"="skateboard"](${south},${west},${north},${east});
+      way["leisure"~"^(park|playground|recreation_ground|garden|nature_reserve)$"]["name"](${south},${west},${north},${east});
+      relation["leisure"~"^(park|playground|recreation_ground|garden|nature_reserve)$"]["name"](${south},${west},${north},${east});
     );
     out center tags;
   `
@@ -101,6 +107,42 @@ async function fetchOverpass({ south, west, north, east }) {
     body: query,
   })
   return data.elements || []
+}
+
+// Distance in meters between two lat/lng pairs (Haversine).
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLng = ((lng2 - lng1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+// Given an unnamed skatepark at (lat,lng), find the nearest named park-like
+// feature within `maxMeters`. Returns the OSM tags object or null.
+function findEnclosingParkName(lat, lng, namedFeatures, maxMeters = 100) {
+  let best = null
+  let bestDist = Infinity
+  for (const f of namedFeatures) {
+    const fLat = f.lat ?? f.center?.lat
+    const fLng = f.lon ?? f.center?.lon
+    if (fLat == null || fLng == null) continue
+    const d = distanceMeters(lat, lng, fLat, fLng)
+    if (d < bestDist && d <= maxMeters) {
+      best = f
+      bestDist = d
+    }
+  }
+  return best ? { name: best.tags.name, distanceMeters: bestDist, parentTags: best.tags } : null
+}
+
+// Append "Skatepark" suffix if the source name doesn't already imply skating.
+function nameFromEnclosingPark(parkName) {
+  if (!parkName) return null
+  if (SKATE_KEYWORDS.test(parkName)) return parkName
+  return `${parkName} Skatepark`
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +327,7 @@ function deriveAddress(tags) {
   return { address: null, source: null }
 }
 
-async function enrichOne(el) {
+async function enrichOne(el, namedFeatures = []) {
   const tags = el.tags || {}
   const lat = el.lat ?? el.center?.lat
   const lng = el.lon ?? el.center?.lon
@@ -400,6 +442,24 @@ async function enrichOne(el) {
     }
   }
 
+  // Enclosing-park name fallback: the skatepark element itself has no name,
+  // but the OSM mapper named the enclosing leisure=park / playground feature.
+  if (!out.name) {
+    const enclosing = findEnclosingParkName(lat, lng, namedFeatures, 100)
+    if (enclosing) {
+      const derived = nameFromEnclosingPark(enclosing.name)
+      if (derived) {
+        out.name = derived
+        out.sources.name = 'enclosing-park'
+        // Carry parent park description through if we still don't have one.
+        if (!out.description && enclosing.parentTags.description) {
+          out.description = enclosing.parentTags.description
+          out.sources.description = 'enclosing-park'
+        }
+      }
+    }
+  }
+
   // Nominatim reverse geocode — only if both name AND address are missing
   if (!out.name || !out.address) {
     const nom = await fetchNominatim(lat, lng)
@@ -428,22 +488,30 @@ async function main() {
   console.log(`[ingest] scope=${scope} bbox=${[bbox.south, bbox.west, bbox.north, bbox.east].join(',')} (${bbox.label || 'custom'})`)
   console.log(`[ingest] fetching from Overpass...`)
   const elements = await fetchOverpass(bbox)
-  console.log(`[ingest] found ${elements.length} OSM records`)
+  console.log(`[ingest] fetched ${elements.length} OSM records (skateparks + named parks for enclosing-name lookup)`)
 
-  // Filter the same way osmService does (sport=skateboard with non-skate names slip in)
-  const candidates = elements.filter((el) => {
+  // Skateparks: leisure=skate_park, sport=skateboard, or a name containing "skate".
+  // Named features (parks/playgrounds): everything else returned by the query — pre-filtered to have a name.
+  const candidates = []
+  const namedFeatures = []
+  for (const el of elements) {
     const tags = el.tags || {}
     const rawName = (tags.name || tags.official_name || '').toLowerCase()
-    return tags.leisure === 'skate_park' || tags.sport === 'skateboard' || rawName.includes('skate')
-  })
-  console.log(`[ingest] ${candidates.length} pass skate-relevance filter; enriching...`)
+    const isSkate = tags.leisure === 'skate_park' || tags.sport === 'skateboard' || rawName.includes('skate')
+    if (isSkate) {
+      candidates.push(el)
+    } else if (tags.name) {
+      namedFeatures.push(el)
+    }
+  }
+  console.log(`[ingest] ${candidates.length} skateparks, ${namedFeatures.length} named leisure features for enclosing-name lookup`)
 
   const enriched = []
   for (let i = 0; i < candidates.length; i++) {
     const el = candidates[i]
     process.stdout.write(`  [${i + 1}/${candidates.length}] osm:${el.type}/${el.id}... `)
     try {
-      const rec = await enrichOne(el)
+      const rec = await enrichOne(el, namedFeatures)
       if (rec) {
         enriched.push(rec)
         process.stdout.write(

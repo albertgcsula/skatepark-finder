@@ -1,8 +1,8 @@
 import React from 'react';
-import { 
-  Grid, 
-  Typography, 
-  Box, 
+import {
+  Grid,
+  Typography,
+  Box,
   Alert
 } from '@mui/material';
 import { SkateparkCard } from './SkateparkCard';
@@ -20,7 +20,7 @@ export const SkateparkList: React.FC = () => {
         </Typography>
         <Grid container spacing={3} alignItems="stretch">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Grid item xs={12} sm={6} md={4} key={i} sx={{ display: 'flex' }}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={i} sx={{ display: 'flex' }}>
               <SkateparkSkeleton />
             </Grid>
           ))}
@@ -54,7 +54,7 @@ export const SkateparkList: React.FC = () => {
       </Typography>
       <Grid container spacing={3} alignItems="stretch">
         {results.map((park) => (
-          <Grid item xs={12} sm={6} md={4} key={park.id} sx={{ display: 'flex' }}>
+          <Grid size={{ xs: 12, sm: 6, md: 4 }} key={park.id} sx={{ display: 'flex' }}>
             <SkateparkCard skatepark={park} />
           </Grid>
         ))}

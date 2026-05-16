@@ -23,15 +23,17 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
   const osmUrl = `https://www.openstreetmap.org/?mlat=${skatepark.lat}&mlon=${skatepark.lon}#map=17/${skatepark.lat}/${skatepark.lon}`;
 
   return (
-    <Card sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Card sx={{ height: '100%', width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
       {skatepark.imageUrl && (
         <CardMedia
           component="img"
           image={skatepark.imageUrl}
           alt={skatepark.name}
           sx={{
+            width: '100%',
             height: 160,
             objectFit: 'cover',
+            display: 'block',
             backgroundColor: '#f0f0f0',
           }}
           loading="lazy"
@@ -41,7 +43,7 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
           }}
         />
       )}
-      <CardContent sx={{ flexGrow: 1, overflow: 'hidden' }}>
+      <CardContent sx={{ flexGrow: 1, overflow: 'hidden', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
         <Typography
           variant="h6"
           component="div"
