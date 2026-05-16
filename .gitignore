@@ -12,5 +12,6 @@ dist-ssr
 .amplify-hosting
 .amplify
 amplify_outputs.json
+scripts/output
 .vscode
 __unconfig*
