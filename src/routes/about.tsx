@@ -138,6 +138,19 @@ function About() {
       <Divider sx={{ my: 4 }} />
 
       <Typography variant="h5" component="h2" gutterBottom sx={{ fontWeight: 600 }}>
+        Know a place we're missing?
+      </Typography>
+      <Typography sx={{ mb: 3, lineHeight: 1.7 }}>
+        Suggest a skatepark, skate spot, or skate shop and we'll review it for inclusion. No
+        account required.
+      </Typography>
+      <Button component={Link} to="/submit" variant="outlined" sx={{ mb: 2 }}>
+        Suggest a spot
+      </Button>
+
+      <Divider sx={{ my: 4 }} />
+
+      <Typography variant="h5" component="h2" gutterBottom sx={{ fontWeight: 600 }}>
         Open source
       </Typography>
       <Typography sx={{ mb: 4, lineHeight: 1.7 }}>

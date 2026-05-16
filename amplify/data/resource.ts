@@ -31,6 +31,26 @@ const schema = a.schema({
       // provider. Before prod: split read (publicApiKey) from write (groups).
       allow.publicApiKey(),
     ]),
+
+  Recommendation: a
+    .model({
+      // Constrained client-side to 'skatepark' | 'spot' | 'shop'. Plain string
+      // here because inline a.enum() interacts poorly with ClientSchema type
+      // inference in this version of Amplify.
+      type: a.string().required(),
+      name: a.string().required(),
+      address: a.string().required(),
+      description: a.string(),
+      website: a.url(),
+      submitterEmail: a.email(),
+      // Honeypot: should always be empty. Non-empty values indicate a bot
+      // submission and are filtered out at review time.
+      honeypot: a.string(),
+      // 'pending' | 'approved' | 'rejected'. Defaulted by the submit form to
+      // 'pending'; admin updates via the AppSync console.
+      status: a.string().required(),
+    })
+    .authorization((allow) => [allow.publicApiKey()]),
 })
 
 export type Schema = ClientSchema<typeof schema>
