@@ -1,14 +1,17 @@
 import React from 'react';
-import { 
-  Card, 
-  CardContent, 
-  Typography, 
-  CardActions, 
-  Button, 
-  Box
+import {
+  Card,
+  CardContent,
+  CardMedia,
+  Typography,
+  CardActions,
+  Button,
+  Box,
+  Link,
 } from '@mui/material';
 import DirectionsIcon from '@mui/icons-material/Directions';
 import MapIcon from '@mui/icons-material/Map';
+import LanguageIcon from '@mui/icons-material/Language';
 import type { Skatepark } from '../services/osmService';
 
 interface SkateparkCardProps {
@@ -21,10 +24,27 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
 
   return (
     <Card sx={{ height: '100%', width: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {skatepark.imageUrl && (
+        <CardMedia
+          component="img"
+          image={skatepark.imageUrl}
+          alt={skatepark.name}
+          sx={{
+            height: 160,
+            objectFit: 'cover',
+            backgroundColor: '#f0f0f0',
+          }}
+          loading="lazy"
+          onError={(e) => {
+            // Hide broken images rather than showing a broken icon
+            (e.currentTarget as HTMLImageElement).style.display = 'none'
+          }}
+        />
+      )}
       <CardContent sx={{ flexGrow: 1, overflow: 'hidden' }}>
-        <Typography 
-          variant="h6" 
-          component="div" 
+        <Typography
+          variant="h6"
+          component="div"
           gutterBottom
           sx={{
             overflow: 'hidden',
@@ -32,16 +52,16 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
-            minHeight: '3.2em', // Fixed height for exactly 2 lines
+            minHeight: '3.2em',
             lineHeight: '1.6em',
-            textWrap: 'balance', // Modern text wrapping for titles
+            textWrap: 'balance',
           }}
           title={skatepark.name}
         >
           {skatepark.name}
         </Typography>
-        <Typography 
-          variant="body2" 
+        <Typography
+          variant="body2"
           color="text.secondary"
           sx={{
             overflow: 'hidden',
@@ -50,11 +70,26 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
             minHeight: '3em',
-            textWrap: 'pretty', // Modern text wrapping to avoid orphans
+            textWrap: 'pretty',
           }}
         >
           {skatepark.address}
         </Typography>
+        {skatepark.description && (
+          <Typography
+            variant="body2"
+            sx={{
+              mt: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical',
+            }}
+          >
+            {skatepark.description}
+          </Typography>
+        )}
         {skatepark.distance !== undefined && (
           <Box sx={{ mt: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Typography variant="body2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
@@ -62,24 +97,42 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
             </Typography>
           </Box>
         )}
+        {skatepark.imageAttribution && (
+          <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 1 }}>
+            Photo: {skatepark.imageAttribution}
+            {skatepark.imageLicense ? ` (${skatepark.imageLicense})` : ''}
+          </Typography>
+        )}
         <Box sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.disabled">
             Lat: {skatepark.lat.toFixed(4)}, Lon: {skatepark.lon.toFixed(4)}
           </Typography>
         </Box>
       </CardContent>
-      <CardActions sx={{ justifyContent: 'space-between', p: 2 }}>
-        <Button 
-          size="small" 
-          startIcon={<DirectionsIcon />} 
+      <CardActions sx={{ justifyContent: 'space-between', p: 2, flexWrap: 'wrap', gap: 1 }}>
+        <Button
+          size="small"
+          startIcon={<DirectionsIcon />}
           href={googleMapsUrl}
           target="_blank"
           rel="noopener noreferrer"
         >
           Directions
         </Button>
-        <Button 
-          size="small" 
+        {skatepark.website && (
+          <Button
+            size="small"
+            startIcon={<LanguageIcon />}
+            component={Link}
+            href={skatepark.website}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Website
+          </Button>
+        )}
+        <Button
+          size="small"
           color="secondary"
           startIcon={<MapIcon />}
           href={osmUrl}

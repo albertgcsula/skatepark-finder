@@ -17,8 +17,6 @@
   "dependencies": {
     "@aws-amplify/backend": "^1.0.0",
     "@aws-amplify/backend-cli": "^1.0.0",
-    "aws-amplify": "^6.0.0",
-    "ngeohash": "^0.6.3",
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
@@ -32,7 +30,9 @@
     "@tanstack/react-router-ssr-query": "latest",
     "@tanstack/react-start": "latest",
     "@tanstack/router-plugin": "^1.132.0",
+    "aws-amplify": "^6.0.0",
     "lucide-react": "^0.545.0",
+    "ngeohash": "^0.6.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-ga4": "^3.0.1",
@@ -49,6 +49,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
+    "tsx": "^4.22.0",
     "typescript": "^5.7.2",
     "vite": "^8.0.0",
     "vitest": "^3.0.5"

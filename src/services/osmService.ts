@@ -1,10 +1,17 @@
 export type Skatepark = {
-  id: number;
+  id: string;
   lat: number;
   lon: number;
   name: string;
   address?: string;
   distance?: number;
+  // Optional enriched fields (populated from DynamoDB; absent from OSM-only results)
+  description?: string;
+  imageUrl?: string;
+  imageAttribution?: string;
+  imageLicense?: string;
+  website?: string;
+  source?: 'ddb' | 'osm';
 }
 
 export type GeocodeResult = {
@@ -169,12 +176,13 @@ export async function fetchSkateparks(
         const distance = calculateDistance(lat, lon, pLat, pLon);
 
         return {
-          id: el.id,
+          id: `${el.type ?? 'osm'}/${el.id}`,
           lat: pLat,
           lon: pLon,
           name,
           address,
           distance,
+          source: 'osm' as const,
         };
       })
       .filter((p: any): p is Skatepark => p !== null && p.distance <= radiusMiles);

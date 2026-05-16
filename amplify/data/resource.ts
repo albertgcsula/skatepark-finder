@@ -24,12 +24,12 @@ const schema = a.schema({
       index('geohash'),
     ])
     .authorization((allow) => [
-      // FIXME(prod): tighten to ['read'] before going live. `create`/`update`
-      // are temporarily granted to apiKey so the local seed script can run
-      // without Cognito user provisioning. Sandbox-only.
-      allow.publicApiKey().to(['read', 'create', 'update']),
-      allow.authenticated().to(['read']),
-      allow.groups(['admins']).to(['create', 'read', 'update', 'delete']),
+      // FIXME(prod): tighten before going live. Mixing publicApiKey with
+      // authenticated/groups caused field-level @aws_api_key directives to not
+      // propagate to optional fields, surfacing as "Unauthorized on [imageUrl,
+      // description, ...]" errors. For sandbox/dev we use a single auth
+      // provider. Before prod: split read (publicApiKey) from write (groups).
+      allow.publicApiKey(),
     ]),
 })
 

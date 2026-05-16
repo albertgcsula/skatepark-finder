@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { Skatepark, GeocodeResult } from '../services/osmService';
-import { geocodeAddress, fetchSkateparks } from '../services/osmService';
+import { geocodeAddress } from '../services/osmService';
+import { fetchSkateparksHybrid } from '../services/skateparkService';
 import { trackEvent } from '../services/analytics';
 
 interface SkateparkContextType {
@@ -33,7 +34,7 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setLoading(true);
     setError(null);
     try {
-      const parks = await fetchSkateparks(lat, lon, rad);
+      const parks = await fetchSkateparksHybrid(lat, lon, rad);
       setResults(parks);
     } catch (err) {
       setError('Failed to fetch skateparks. Please try again.');
