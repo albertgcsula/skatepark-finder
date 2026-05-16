@@ -11,4 +11,9 @@
       <image:caption>Find skateparks near you.</image:caption>
     </image:image>
   </url>
+  <url>
+    <loc>https://sk8finder.cloud/about</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.5</priority>
+  </url>
 </urlset>

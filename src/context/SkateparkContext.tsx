@@ -19,8 +19,10 @@ interface SkateparkContextType {
 const SkateparkContext = createContext<SkateparkContextType | undefined>(undefined);
 
 export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const navigate = useNavigate({ from: '/' });
-  const searchParams = useSearch({ from: '/' });
+  const navigate = useNavigate();
+  // strict: false lets us mount the provider on any route (e.g. /about) without
+  // throwing — it returns the current route's search params or an empty object.
+  const searchParams = useSearch({ strict: false }) as { q?: string; radius?: number };
   
   const [location, setLocation] = useState<GeocodeResult | null>(null);
   const [results, setResults] = useState<Skatepark[]>([]);
