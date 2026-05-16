@@ -15,6 +15,14 @@ const PRESETS = {
   la: { south: 33.7037, west: -118.6682, north: 34.3373, east: -118.1553, label: 'Los Angeles' },
   portland: { south: 45.4327, west: -122.8367, north: 45.6529, east: -122.4717, label: 'Portland OR' },
   brooklyn: { south: 40.5707, west: -74.0419, north: 40.7395, east: -73.8334, label: 'Brooklyn NY' },
+  sf: { south: 37.2000, west: -122.5500, north: 37.9500, east: -121.8500, label: 'SF Bay Area' },
+  seattle: { south: 47.1800, west: -122.5500, north: 47.8500, east: -122.1000, label: 'Seattle metro' },
+  austin: { south: 30.1300, west: -97.9300, north: 30.5500, east: -97.5000, label: 'Austin TX' },
+  chicago: { south: 41.6200, west: -87.9500, north: 42.0500, east: -87.5000, label: 'Chicago' },
+  denver: { south: 39.5500, west: -105.2000, north: 39.9500, east: -104.5500, label: 'Denver' },
+  sandiego: { south: 32.5500, west: -117.3000, north: 33.1200, east: -116.8500, label: 'San Diego' },
+  boston: { south: 42.2000, west: -71.3000, north: 42.4500, east: -70.8500, label: 'Boston metro' },
+  philly: { south: 39.8700, west: -75.3000, north: 40.1500, east: -74.9500, label: 'Philadelphia' },
 }
 
 const args = Object.fromEntries(
