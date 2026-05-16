@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import type { Skatepark, GeocodeResult } from '../services/osmService';
+import type { PlaceType, Skatepark, GeocodeResult } from '../services/osmService';
 import { geocodeAddress } from '../services/osmService';
 import { fetchSkateparksHybrid } from '../services/skateparkService';
 import { trackEvent } from '../services/analytics';
+
+const ALL_PLACE_TYPES: readonly PlaceType[] = ['park', 'spot', 'shop'];
 
 interface SkateparkContextType {
   location: GeocodeResult | null;
@@ -11,9 +13,11 @@ interface SkateparkContextType {
   results: Skatepark[];
   loading: boolean;
   error: string | null;
+  placeTypeFilter: readonly PlaceType[];
   setRadius: (radius: number) => void;
   search: (query: string) => void;
   locateMe: () => Promise<void>;
+  togglePlaceType: (type: PlaceType) => void;
 }
 
 const SkateparkContext = createContext<SkateparkContextType | undefined>(undefined);
@@ -92,6 +96,18 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     });
   }, [navigate]);
 
+  const [placeTypeFilter, setPlaceTypeFilter] = useState<readonly PlaceType[]>(ALL_PLACE_TYPES);
+
+  const togglePlaceType = useCallback((type: PlaceType) => {
+    setPlaceTypeFilter((current) => {
+      const next = current.includes(type)
+        ? current.filter((t) => t !== type)
+        : [...current, type];
+      // Never let the user deselect every type — fall back to all.
+      return next.length === 0 ? ALL_PLACE_TYPES : next;
+    });
+  }, []);
+
   const locateMe = useCallback(async () => {
     if (!navigator.geolocation) {
       setError('Geolocation is not supported by your browser.');
@@ -133,9 +149,11 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         results,
         loading,
         error,
+        placeTypeFilter,
         setRadius,
         search,
         locateMe,
+        togglePlaceType,
       }}
     >
       {children}

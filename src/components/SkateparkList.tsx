@@ -10,7 +10,11 @@ import { SkateparkSkeleton } from './SkateparkSkeleton';
 import { useSkateparks } from '../context/SkateparkContext';
 
 export const SkateparkList: React.FC = () => {
-  const { results, loading, error, location } = useSkateparks();
+  const { results, loading, error, location, placeTypeFilter } = useSkateparks();
+
+  const visibleResults = results.filter((p) =>
+    placeTypeFilter.includes((p.placeType ?? 'park'))
+  );
 
   if (loading) {
     return (
@@ -47,13 +51,23 @@ export const SkateparkList: React.FC = () => {
     return null;
   }
 
+  if (visibleResults.length === 0) {
+    return (
+      <Box sx={{ textAlign: 'center', my: 8 }}>
+        <Typography variant="h6" color="text.secondary">
+          No results match the selected filters. Try toggling more types on.
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
         Results near {location.displayName}
       </Typography>
       <Grid container spacing={3} alignItems="stretch">
-        {results.map((park) => (
+        {visibleResults.map((park) => (
           <Grid size={{ xs: 12, sm: 6, md: 4 }} key={park.id} sx={{ display: 'flex' }}>
             <SkateparkCard skatepark={park} />
           </Grid>

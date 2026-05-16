@@ -18,6 +18,9 @@ const schema = a.schema({
       surface: a.string(),
       geohash: a.string().required(),
       region: a.string().required(),
+      // 'park' | 'spot' | 'shop'. Optional so existing rows seeded before this
+      // column was added remain valid; backfilled by the next seed run.
+      placeType: a.string(),
     })
     .secondaryIndexes((index) => [
       index('region').sortKeys(['osmId']),

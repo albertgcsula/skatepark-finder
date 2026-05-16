@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Box, Divider } from '@mui/material'
 import { SearchForm } from '../components/SearchForm'
 import { SkateparkList } from '../components/SkateparkList'
+import { PlaceTypeFilter } from '../components/PlaceTypeFilter'
 import { z } from 'zod'
 
 const searchSchema = z.object({
@@ -53,6 +54,8 @@ function Home() {
       <SearchForm />
 
       <Divider sx={{ my: 4 }} />
+
+      <PlaceTypeFilter />
 
       <SkateparkList />
     </Box>

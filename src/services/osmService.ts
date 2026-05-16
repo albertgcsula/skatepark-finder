@@ -1,3 +1,5 @@
+export type PlaceType = 'park' | 'spot' | 'shop';
+
 export type Skatepark = {
   id: string;
   lat: number;
@@ -5,6 +7,7 @@ export type Skatepark = {
   name: string;
   address?: string;
   distance?: number;
+  placeType?: PlaceType;
   // Optional enriched fields (populated from DynamoDB; absent from OSM-only results)
   description?: string;
   imageUrl?: string;
@@ -12,6 +15,15 @@ export type Skatepark = {
   imageLicense?: string;
   website?: string;
   source?: 'ddb' | 'osm';
+}
+
+// Keep in sync with scripts/lib/classifyPlaceType.mjs.
+function classifyPlaceType(tags: Record<string, string> | undefined): PlaceType {
+  if (!tags) return 'park';
+  if (tags.shop) return 'shop';
+  if (tags.leisure === 'skate_park') return 'park';
+  if (tags.sport === 'skateboard') return 'spot';
+  return 'park';
 }
 
 export type GeocodeResult = {
@@ -143,19 +155,22 @@ export async function fetchSkateparks(
 
         if (!isSkatePark) return null;
 
+        const placeType = classifyPlaceType(tags);
+        const typeLabel = placeType === 'shop' ? 'Skate Shop' : placeType === 'spot' ? 'Skate Spot' : 'Skatepark';
+
         // 2. Intelligent Naming Fallback
         let name = rawName;
         if (!name) {
           if (tags.operator) {
-            name = `${tags.operator} Skatepark`;
+            name = `${tags.operator} ${typeLabel}`;
           } else if (tags['addr:street']) {
-            name = `${tags['addr:street']} Skatepark`;
+            name = `${tags['addr:street']} ${typeLabel}`;
           } else if (tags['addr:city']) {
-            name = `${tags['addr:city']} Skatepark`;
+            name = `${tags['addr:city']} ${typeLabel}`;
           } else if (tags.brand) {
-            name = `${tags.brand} Skatepark`;
+            name = `${tags.brand} ${typeLabel}`;
           } else {
-            name = 'Unnamed Skatepark';
+            name = `Unnamed ${typeLabel}`;
           }
         }
 
@@ -182,6 +197,7 @@ export async function fetchSkateparks(
           name,
           address,
           distance,
+          placeType,
           source: 'osm' as const,
         };
       })

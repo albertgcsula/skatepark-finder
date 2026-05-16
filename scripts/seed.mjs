@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
 import geohash from 'ngeohash'
+import { classifyPlaceType } from './lib/classifyPlaceType.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
@@ -83,6 +84,7 @@ function toSkatepark(r) {
     surface: r.surface ?? null,
     geohash: geohash.encode(r.lat, r.lng, 9),
     region: r.region,
+    placeType: classifyPlaceType(r.rawOsmTags),
   }
 }
 

@@ -2,7 +2,7 @@ import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
 import type { Schema } from '../../amplify/data/resource'
 import { fetchSkateparks as fetchSkateparksOsm } from './osmService'
-import type { Skatepark } from './osmService'
+import type { PlaceType, Skatepark } from './osmService'
 
 // Load amplify_outputs.json via Vite's glob — gracefully handles the file
 // being absent (e.g., dev server without `npx ampx sandbox` running).
@@ -64,6 +64,7 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
       imageAttribution: r.imageAttribution ?? undefined,
       imageLicense: r.imageLicense ?? undefined,
       website: r.website ?? undefined,
+      placeType: (r.placeType ?? 'park') as PlaceType,
       distance: haversine(lat, lon, r.lat, r.lng),
       source: 'ddb' as const,
     }))

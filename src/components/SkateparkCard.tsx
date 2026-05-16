@@ -3,6 +3,7 @@ import {
   Card,
   CardContent,
   CardMedia,
+  Chip,
   Typography,
   CardActions,
   Button,
@@ -12,7 +13,16 @@ import {
 import DirectionsIcon from '@mui/icons-material/Directions';
 import MapIcon from '@mui/icons-material/Map';
 import LanguageIcon from '@mui/icons-material/Language';
-import type { Skatepark } from '../services/osmService';
+import ParkIcon from '@mui/icons-material/Park';
+import PlaceIcon from '@mui/icons-material/Place';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import type { PlaceType, Skatepark } from '../services/osmService';
+
+const PLACE_TYPE_META: Record<PlaceType, { label: string; icon: React.ReactElement; color: 'success' | 'info' | 'warning' }> = {
+  park: { label: 'Park', icon: <ParkIcon />, color: 'success' },
+  spot: { label: 'Spot', icon: <PlaceIcon />, color: 'info' },
+  shop: { label: 'Shop', icon: <StorefrontIcon />, color: 'warning' },
+};
 
 interface SkateparkCardProps {
   skatepark: Skatepark;
@@ -21,6 +31,7 @@ interface SkateparkCardProps {
 export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
   const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${skatepark.lat},${skatepark.lon}`;
   const osmUrl = `https://www.openstreetmap.org/?mlat=${skatepark.lat}&mlon=${skatepark.lon}#map=17/${skatepark.lat}/${skatepark.lon}`;
+  const typeMeta = PLACE_TYPE_META[skatepark.placeType ?? 'park'];
 
   return (
     <Card sx={{ height: '100%', width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
@@ -44,6 +55,14 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
         />
       )}
       <CardContent sx={{ flexGrow: 1, overflow: 'hidden', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+        <Chip
+          icon={typeMeta.icon}
+          label={typeMeta.label}
+          size="small"
+          color={typeMeta.color}
+          variant="outlined"
+          sx={{ mb: 1 }}
+        />
         <Typography
           variant="h6"
           component="div"
