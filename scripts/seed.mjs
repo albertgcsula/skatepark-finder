@@ -14,7 +14,9 @@ import geohash from 'ngeohash'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const OUTPUT_DIR = join(__dirname, 'output')
-const OUTPUTS_FILE = join(ROOT, 'amplify_outputs.json')
+const OUTPUTS_FILE = process.env.AMPLIFY_OUTPUTS
+  ? (process.env.AMPLIFY_OUTPUTS.startsWith('/') ? process.env.AMPLIFY_OUTPUTS : join(ROOT, process.env.AMPLIFY_OUTPUTS))
+  : join(ROOT, 'amplify_outputs.json')
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
