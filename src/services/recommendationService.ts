@@ -32,7 +32,7 @@ export async function submitRecommendation(input: RecommendationInput): Promise<
     description: input.description?.trim() || undefined,
     website: input.website?.trim() || undefined,
     submitterEmail: input.submitterEmail?.trim() || undefined,
-    honeypot: '',
+    referralCode: '',
     status: 'pending',
   })
   if (errors?.length) {

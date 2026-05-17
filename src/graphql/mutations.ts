@@ -118,7 +118,7 @@ export async function createRecommendation(input: {
   description?: string
   website?: string
   submitterEmail?: string
-  honeypot?: string
+  referralCode?: string
   status?: 'pending' | 'approved' | 'rejected'
 }) {
   return await client.models.Recommendation.create({
@@ -235,7 +235,7 @@ export async function deleteBotRecommendations() {
 
     if (page.data) {
       const bots = page.data
-        .filter((rec) => rec.honeypot && rec.honeypot !== '')
+        .filter((rec) => rec.referralCode && rec.referralCode !== '')
         .map((rec) => rec.id)
 
       botSubmissions.push(...bots)

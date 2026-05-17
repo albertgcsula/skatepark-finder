@@ -222,7 +222,7 @@ export async function getValidRecommendations(limit = 1000) {
   
   if (response.data) {
     const filtered = response.data.filter(
-      rec => !rec.honeypot || rec.honeypot === ''
+      (rec) => !rec.referralCode || rec.referralCode === '',
     )
     return { ...response, data: filtered }
   }

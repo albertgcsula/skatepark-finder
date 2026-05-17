@@ -27,12 +27,13 @@ const schema = a.schema({
       index('geohash'),
     ])
     .authorization((allow) => [
-      // FIXME(prod): tighten before going live. Mixing publicApiKey with
-      // authenticated/groups caused field-level @aws_api_key directives to not
-      // propagate to optional fields, surfacing as "Unauthorized on [imageUrl,
-      // description, ...]" errors. For sandbox/dev we use a single auth
-      // provider. Before prod: split read (publicApiKey) from write (groups).
-      allow.publicApiKey(),
+      // Public via API key: read to populate the search UI, create to support
+      // the auto-cache feature that persists OSM results into DDB after each
+      // search. Update/delete are reserved for admins.
+      allow.publicApiKey().to(['read', 'create']),
+      // Admins: full control for moderation and cleanup. Reach this group via
+      // the Cognito user pool; manage members in the AWS console.
+      allow.groups(['admins']),
     ]),
 
   Recommendation: a
@@ -46,14 +47,21 @@ const schema = a.schema({
       description: a.string(),
       website: a.url(),
       submitterEmail: a.email(),
-      // Honeypot: should always be empty. Non-empty values indicate a bot
-      // submission and are filtered out at review time.
-      honeypot: a.string(),
+      // Spam trap. Should always be empty on legitimate submissions; bots
+      // auto-fill every input. Named innocuously so bots reading the GraphQL
+      // schema docs don't recognize it as a honeypot.
+      referralCode: a.string(),
       // 'pending' | 'approved' | 'rejected'. Defaulted by the submit form to
       // 'pending'; admin updates via the AppSync console.
       status: a.string().required(),
     })
-    .authorization((allow) => [allow.publicApiKey()]),
+    .authorization((allow) => [
+      // Public can submit but cannot read other submissions (would expose
+      // submitter emails) or modify existing ones.
+      allow.publicApiKey().to(['create']),
+      // Admins read/update/delete via AppSync console or future admin UI.
+      allow.groups(['admins']),
+    ]),
 })
 
 export type Schema = ClientSchema<typeof schema>
