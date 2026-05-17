@@ -22,6 +22,7 @@ function classifyPlaceType(tags: Record<string, string> | undefined): PlaceType 
   if (!tags) return 'park';
   if (tags.shop) return 'shop';
   if (tags.leisure === 'skate_park') return 'park';
+  if (tags.sport === 'skateboard' && tags.leisure) return 'park';
   if (tags.sport === 'skateboard') return 'spot';
   return 'park';
 }
