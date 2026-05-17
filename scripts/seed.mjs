@@ -9,6 +9,7 @@ import { dirname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Amplify } from 'aws-amplify'
 import { generateClient } from 'aws-amplify/data'
+import { signIn, signOut } from 'aws-amplify/auth'
 import geohash from 'ngeohash'
 import { classifyPlaceType } from './lib/classifyPlaceType.mjs'
 
@@ -38,10 +39,24 @@ if (!existsSync(OUTPUTS_FILE)) {
 
 const outputs = JSON.parse(await readFile(OUTPUTS_FILE, 'utf8'))
 Amplify.configure(outputs)
-const client = generateClient({ authMode: 'apiKey' })
+
+// Auth mode: default to apiKey (read+create only under tightened prod schema).
+// If ADMIN_EMAIL + ADMIN_PASSWORD are provided, sign in as a Cognito admin so
+// update operations succeed — required when re-seeding existing rows. The
+// admin user must already be a member of the `admins` group in the user pool.
+const adminEmail = process.env.ADMIN_EMAIL
+const adminPassword = process.env.ADMIN_PASSWORD
+let authMode = 'apiKey'
+if (adminEmail && adminPassword) {
+  console.log(`[seed] signing in as admin ${adminEmail}...`)
+  await signIn({ username: adminEmail, password: adminPassword })
+  authMode = 'userPool'
+  console.log(`[seed] signed in; using userPool auth`)
+}
+const client = generateClient({ authMode })
 
 console.log(`[seed] data endpoint: ${outputs.data?.url ?? '(unknown)'}`)
-console.log(`[seed] dryRun=${dryRun}${onlyRegions ? ` regions=${onlyRegions.join(',')}` : ''}`)
+console.log(`[seed] authMode=${authMode} dryRun=${dryRun}${onlyRegions ? ` regions=${onlyRegions.join(',')}` : ''}`)
 
 // ---------------------------------------------------------------------------
 // Load ingest output files
@@ -160,6 +175,10 @@ console.log(`  updated:      ${stats.updated}`)
 console.log(`  would-create: ${stats['would-create']}`)
 console.log(`  would-update: ${stats['would-update']}`)
 console.log(`  errors:       ${stats.error}`)
+
+if (authMode === 'userPool') {
+  try { await signOut() } catch {}
+}
 
 if (errors.length) {
   console.log(`\n[seed] first 5 errors:`)
