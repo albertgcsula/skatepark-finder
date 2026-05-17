@@ -22,7 +22,6 @@ if (existsSync(envPath)) {
 
 const USER_AGENT = 'SkateparkFinder-Ingest/1.0 (https://sk8finder.cloud; contact via github.com/albertgcsula/skatepark-finder)'
 const YELP_API_KEY = process.env.YELP_API_KEY
-const YELP_DAILY_CAP = 450 // soft stop below the documented 500/day to leave headroom for retries
 
 const PRESETS = {
   nyc: { south: 40.4774, west: -74.2591, north: 40.9176, east: -73.7004, label: 'New York City' },
@@ -298,11 +297,13 @@ async function fetchWikidata(qid) {
 // ---------------------------------------------------------------------------
 // 5. Yelp Fusion — businesses near (lat,lng) for images, ratings, phone, URL
 
-// Free tier is ~500 /businesses/search calls/day. We track usage off the
-// RateLimit-Remaining header and stop calling Yelp once we've used our share
-// for this run (leaves headroom for retries / other runs the same day).
+// Free tier is 300 /businesses/search calls/day (resets at midnight UTC,
+// surfaced via the `ratelimit-resettime` header). Empirically Yelp keeps
+// serving 200s even when `ratelimit-remaining` goes negative — the only hard
+// stop is HTTP 429. We track usage just for stats / logging.
 let yelpCalls = 0
 let yelpRemaining = Infinity
+let yelpResetTime = null
 let yelpStopped = false
 
 function nameSimilarity(a, b) {
@@ -316,7 +317,9 @@ function nameSimilarity(a, b) {
 }
 
 // Match a Yelp business to our OSM record. Two acceptance paths:
-//   1. Has the `skateparks` category alias AND is within 200m of the OSM coords.
+//   1. Has the `skate_parks` (or `skateparks`) category alias AND is within
+//      200m of the OSM coords. Yelp's canonical alias is `skate_parks`; we
+//      accept the unscored variant too in case Yelp ever introduces it.
 //   2. Name contains "skate" AND is within 150m AND has name overlap >= 0.3.
 // Stops on the first qualifying business (Yelp returns sort_by=distance, so
 // closest first).
@@ -326,7 +329,9 @@ function pickYelpMatch(businesses, osmName, osmLat, osmLng) {
     const bLng = b.coordinates?.longitude
     if (bLat == null || bLng == null) continue
     const dist = distanceMeters(osmLat, osmLng, bLat, bLng)
-    const isSkateparkCategory = (b.categories || []).some((c) => c.alias === 'skateparks')
+    const isSkateparkCategory = (b.categories || []).some(
+      (c) => c.alias === 'skate_parks' || c.alias === 'skateparks',
+    )
     const nameHasSkate = /skate/i.test(b.name || '')
     if (isSkateparkCategory && dist <= 200) return { business: b, distanceMeters: dist }
     if (nameHasSkate && dist <= 150 && nameSimilarity(osmName, b.name) >= 0.3) {
@@ -339,13 +344,6 @@ function pickYelpMatch(businesses, osmName, osmLat, osmLng) {
 async function fetchYelp(name, lat, lng) {
   if (!YELP_API_KEY) return null
   if (yelpStopped) return null
-  if (yelpCalls >= YELP_DAILY_CAP || yelpRemaining <= 5) {
-    if (!yelpStopped) {
-      console.warn(`\n[ingest] Yelp quota guard hit (calls=${yelpCalls}, remaining=${yelpRemaining}); stopping Yelp lookups for the rest of this run.`)
-      yelpStopped = true
-    }
-    return null
-  }
   try {
     const url = `https://api.yelp.com/v3/businesses/search?term=skatepark&latitude=${lat}&longitude=${lng}&radius=400&limit=5&sort_by=distance`
     const ctrl = new AbortController()
@@ -356,10 +354,11 @@ async function fetchYelp(name, lat, lng) {
     })
     clearTimeout(timer)
     yelpCalls++
-    const remainingHeader = res.headers.get('RateLimit-Remaining')
+    const remainingHeader = res.headers.get('RateLimit-Remaining') ?? res.headers.get('ratelimit-remaining')
     if (remainingHeader != null) yelpRemaining = parseInt(remainingHeader, 10)
+    yelpResetTime = res.headers.get('ratelimit-resettime') ?? yelpResetTime
     if (res.status === 429) {
-      console.warn(`\n[ingest] Yelp returned 429 (daily limit). Halting Yelp lookups.`)
+      console.warn(`\n[ingest] Yelp returned 429 (daily limit). Halting Yelp lookups. Resets at ${yelpResetTime || 'midnight UTC'}.`)
       yelpStopped = true
       return null
     }
@@ -684,7 +683,7 @@ async function main() {
   console.log(`  with phone:       ${stats.withPhone}/${stats.total} (${pct(stats.withPhone, stats.total)}%)`)
   console.log(`  name sources:     ${JSON.stringify(stats.nameSources)}`)
   console.log(`  image sources:    ${JSON.stringify(stats.imageSources)}`)
-  console.log(`  yelp calls:       ${stats.yelpCalls}${stats.yelpRemaining != null ? ` (remaining today: ${stats.yelpRemaining})` : ''}`)
+  console.log(`  yelp calls:       ${stats.yelpCalls}${stats.yelpRemaining != null ? ` (remaining today: ${stats.yelpRemaining})` : ''}${yelpResetTime ? ` (resets ${yelpResetTime})` : ''}`)
 }
 
 function tally(arr) {
