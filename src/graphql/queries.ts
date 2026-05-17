@@ -36,7 +36,9 @@ export async function getSkateparkById(id: string) {
  * Regions: 'austin', 'boston', 'chicago', 'denver', 'la', 'nyc', 'philly', 'portland', 'sandiego', 'seattle', 'sf'
  */
 export async function listSkateparksByRegion(region: string, limit = 100, nextToken?: string) {
-  return await client.models.Skatepark.listSkateparkByRegion({
+  // The exact generated index method name + arg shape varies by Amplify Gen 2
+  // version. Casting until this helper is wired up in real call sites.
+  return await (client.models.Skatepark as unknown as { listSkateparkByRegion: (args: unknown) => Promise<unknown> }).listSkateparkByRegion({
     region,
     limit,
     nextToken,
@@ -48,7 +50,7 @@ export async function listSkateparksByRegion(region: string, limit = 100, nextTo
  * Useful for geographic queries
  */
 export async function listSkateparksByGeohash(geohash: string, limit = 100, nextToken?: string) {
-  return await client.models.Skatepark.listSkateparkByGeohash({
+  return await (client.models.Skatepark.listSkateparkByGeohash as (args: unknown) => Promise<unknown>)({
     geohash,
     limit,
     nextToken,
@@ -109,16 +111,21 @@ export async function getSkateparksByRegionAndType(
   placeType: string,
   limit = 100
 ) {
-  const response = await client.models.Skatepark.listSkateparkByRegion({
+  type RegionResponse = {
+    data?: Array<Schema['Skatepark']['type']>
+    errors?: Array<{ message?: string }>
+    nextToken?: string | null
+  }
+  const response: RegionResponse = await (client.models.Skatepark as unknown as { listSkateparkByRegion: (args: unknown) => Promise<RegionResponse> }).listSkateparkByRegion({
     region,
     limit,
   })
-  
+
   if (response.data) {
-    const filtered = response.data.filter(park => park.placeType === placeType)
+    const filtered = response.data.filter((park) => park.placeType === placeType)
     return { ...response, data: filtered }
   }
-  
+
   return response
 }
 
@@ -227,28 +234,34 @@ export async function getValidRecommendations(limit = 1000) {
 // HELPER FUNCTIONS
 // ============================================================================
 
+type ListPage<T> = {
+  data?: T[]
+  errors?: Array<{ message?: string }>
+  nextToken?: string | null
+}
+
 /**
  * Fetch all items with automatic pagination
  */
 export async function fetchAllSkateparks() {
   let nextToken: string | undefined | null = undefined
   const all: Array<Schema['Skatepark']['type']> = []
-  
+
   do {
-    const page = await client.models.Skatepark.list({
+    const page: ListPage<Schema['Skatepark']['type']> = await client.models.Skatepark.list({
       limit: 1000,
       nextToken: nextToken ?? undefined,
     })
-    
+
     if (page.errors?.length) {
       console.error('[queries] Error fetching skateparks:', page.errors)
       break
     }
-    
+
     all.push(...(page.data ?? []))
     nextToken = page.nextToken
   } while (nextToken)
-  
+
   return all
 }
 
@@ -258,22 +271,22 @@ export async function fetchAllSkateparks() {
 export async function fetchAllRecommendations() {
   let nextToken: string | undefined | null = undefined
   const all: Array<Schema['Recommendation']['type']> = []
-  
+
   do {
-    const page = await client.models.Recommendation.list({
+    const page: ListPage<Schema['Recommendation']['type']> = await client.models.Recommendation.list({
       limit: 1000,
       nextToken: nextToken ?? undefined,
     })
-    
+
     if (page.errors?.length) {
       console.error('[queries] Error fetching recommendations:', page.errors)
       break
     }
-    
+
     all.push(...(page.data ?? []))
     nextToken = page.nextToken
   } while (nextToken)
-  
+
   return all
 }
 

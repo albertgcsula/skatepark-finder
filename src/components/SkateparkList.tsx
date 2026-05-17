@@ -22,7 +22,7 @@ export const SkateparkList: React.FC = () => {
         <Typography variant="h5" gutterBottom sx={{ mb: 3, opacity: 0.5 }}>
           Searching for skateparks...
         </Typography>
-        <Grid container spacing={3} alignItems="stretch">
+        <Grid container spacing={3} sx={{ alignItems: 'stretch' }}>
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <Grid size={{ xs: 12, sm: 6, md: 4 }} key={i} sx={{ display: 'flex' }}>
               <SkateparkSkeleton />
@@ -66,7 +66,7 @@ export const SkateparkList: React.FC = () => {
       <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
         Results near {location.displayName}
       </Typography>
-      <Grid container spacing={3} alignItems="stretch">
+      <Grid container spacing={3} sx={{ alignItems: 'stretch' }}>
         {visibleResults.map((park) => (
           <Grid size={{ xs: 12, sm: 6, md: 4 }} key={park.id} sx={{ display: 'flex' }}>
             <SkateparkCard skatepark={park} />

@@ -219,23 +219,28 @@ export async function bulkRejectRecommendations(ids: string[]) {
  */
 export async function deleteBotRecommendations() {
   // First, fetch all recommendations
+  type RecPage = {
+    data?: Array<Schema['Recommendation']['type']>
+    errors?: Array<{ message?: string }>
+    nextToken?: string | null
+  }
   let nextToken: string | undefined | null = undefined
   const botSubmissions: string[] = []
-  
+
   do {
-    const page = await client.models.Recommendation.list({
+    const page: RecPage = await client.models.Recommendation.list({
       limit: 1000,
       nextToken: nextToken ?? undefined,
     })
-    
+
     if (page.data) {
       const bots = page.data
-        .filter(rec => rec.honeypot && rec.honeypot !== '')
-        .map(rec => rec.id)
-      
+        .filter((rec) => rec.honeypot && rec.honeypot !== '')
+        .map((rec) => rec.id)
+
       botSubmissions.push(...bots)
     }
-    
+
     nextToken = page.nextToken
   } while (nextToken)
   

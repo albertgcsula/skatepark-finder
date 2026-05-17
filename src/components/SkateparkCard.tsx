@@ -34,7 +34,7 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
   const typeMeta = PLACE_TYPE_META[skatepark.placeType ?? 'park'];
 
   return (
-    <Card sx={{ height: '100%', width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+    <Card data-id={skatepark.ddbId} data-geohash={skatepark.geohash} sx={{ height: '100%', width: '100%', maxWidth: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
       {skatepark.imageUrl && (
         <CardMedia
           component="img"

@@ -85,14 +85,18 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [searchParams, performSearch]);
 
   const search = useCallback((query: string) => {
+    // Cast: useNavigate() with no `from:` returns a navigate typed against
+    // the intersection of all routes' search schemas, which collapses to
+    // `never`. We accept the looser typing since this provider mounts on
+    // every route.
     navigate({
-      search: (prev) => ({ ...prev, q: query }),
+      search: ((prev: { q?: string; radius?: number }) => ({ ...prev, q: query })) as never,
     });
   }, [navigate]);
 
   const setRadius = useCallback((newRadius: number) => {
     navigate({
-      search: (prev) => ({ ...prev, radius: newRadius }),
+      search: ((prev: { q?: string; radius?: number }) => ({ ...prev, radius: newRadius })) as never,
     });
   }, [navigate]);
 
@@ -129,7 +133,7 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         // For "Locate Me", we might not have a q, so we search directly
         // and update the URL to clear q if it exists
         navigate({
-          search: (prev) => ({ ...prev, q: undefined }),
+          search: ((prev: { q?: string; radius?: number }) => ({ ...prev, q: undefined })) as never,
         });
         await performSearch(latitude, longitude, searchParams.radius || 10);
       },

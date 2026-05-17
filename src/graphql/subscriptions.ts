@@ -143,23 +143,23 @@ export function subscribeToAllSkateparkEvents(callbacks: {
   onUpdate?: (data: Schema['Skatepark']['type']) => void
   onDelete?: (data: Schema['Skatepark']['type']) => void
 }) {
-  const subscriptions = []
-  
+  const subscriptions: Array<{ unsubscribe(): void }> = []
+
   if (callbacks.onCreate) {
     subscriptions.push(onCreateSkatepark(callbacks.onCreate))
   }
-  
+
   if (callbacks.onUpdate) {
     subscriptions.push(onUpdateSkatepark(callbacks.onUpdate))
   }
-  
+
   if (callbacks.onDelete) {
     subscriptions.push(onDeleteSkatepark(callbacks.onDelete))
   }
-  
+
   return {
     unsubscribe: () => {
-      subscriptions.forEach(sub => sub.unsubscribe())
+      subscriptions.forEach((sub) => sub.unsubscribe())
     },
   }
 }
@@ -172,23 +172,23 @@ export function subscribeToAllRecommendationEvents(callbacks: {
   onUpdate?: (data: Schema['Recommendation']['type']) => void
   onDelete?: (data: Schema['Recommendation']['type']) => void
 }) {
-  const subscriptions = []
-  
+  const subscriptions: Array<{ unsubscribe(): void }> = []
+
   if (callbacks.onCreate) {
     subscriptions.push(onCreateRecommendation(callbacks.onCreate))
   }
-  
+
   if (callbacks.onUpdate) {
     subscriptions.push(onUpdateRecommendation(callbacks.onUpdate))
   }
-  
+
   if (callbacks.onDelete) {
     subscriptions.push(onDeleteRecommendation(callbacks.onDelete))
   }
-  
+
   return {
     unsubscribe: () => {
-      subscriptions.forEach(sub => sub.unsubscribe())
+      subscriptions.forEach((sub) => sub.unsubscribe())
     },
   }
 }

@@ -2,12 +2,15 @@ export type PlaceType = 'park' | 'spot' | 'shop';
 
 export type Skatepark = {
   id: string;
+  // Amplify/DynamoDB-generated UUID. Only present for DDB-sourced records.
+  ddbId?: string;
   lat: number;
   lon: number;
   name: string;
   address?: string;
   distance?: number;
   placeType?: PlaceType;
+  geohash?: string;
   // Optional enriched fields (populated from DynamoDB; absent from OSM-only results)
   description?: string;
   imageUrl?: string;
@@ -26,6 +29,9 @@ function classifyPlaceType(tags: Record<string, string> | undefined): PlaceType 
   if (tags.sport === 'skateboard') return 'spot';
   return 'park';
 }
+
+// Minimal ngeohash typing — package ships JS only.
+import ngeohash from 'ngeohash';
 
 export type GeocodeResult = {
   lat: number;
@@ -199,6 +205,7 @@ export async function fetchSkateparks(
           address,
           distance,
           placeType,
+          geohash: ngeohash.encode(pLat, pLon, 9),
           source: 'osm' as const,
         };
       })

@@ -35,6 +35,12 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
+type SkateparkListPage = {
+  data?: Array<Schema['Skatepark']['type']>
+  errors?: Array<{ message?: string }>
+  nextToken?: string | null
+}
+
 async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Promise<Skatepark[]> {
   if (!client) return []
   // Phase 2b: list all and filter client-side. At ~500 records this is trivial.
@@ -42,7 +48,7 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
   let nextToken: string | undefined | null = undefined
   const all: Array<Schema['Skatepark']['type']> = []
   do {
-    const page = await client.models.Skatepark.list({ limit: 1000, nextToken: nextToken ?? undefined })
+    const page: SkateparkListPage = await client.models.Skatepark.list({ limit: 1000, nextToken: nextToken ?? undefined })
     if (page.errors?.length) {
       console.error('[skateparkService] DynamoDB list errors:', page.errors)
       return []
@@ -55,6 +61,7 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
     .map((r) => ({
       // Use osmId as the canonical id so DDB and OSM records dedupe in the merge step.
       id: r.osmId,
+      ddbId: r.id,
       lat: r.lat,
       lon: r.lng,
       name: r.name,
@@ -65,6 +72,7 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
       imageLicense: r.imageLicense ?? undefined,
       website: r.website ?? undefined,
       placeType: (r.placeType ?? 'park') as PlaceType,
+      geohash: r.geohash,
       distance: haversine(lat, lon, r.lat, r.lng),
       source: 'ddb' as const,
     }))
