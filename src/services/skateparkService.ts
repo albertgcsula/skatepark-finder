@@ -3,6 +3,7 @@ import { generateClient } from 'aws-amplify/data'
 import type { Schema } from '../../amplify/data/resource'
 import { fetchSkateparks as fetchSkateparksOsm } from './osmService'
 import type { PlaceType, Skatepark } from './osmService'
+import { closestRegion } from './regions'
 
 // Load amplify_outputs.json via Vite's glob — gracefully handles the file
 // being absent (e.g., dev server without `npx ampx sandbox` running).
@@ -121,4 +122,44 @@ export async function fetchSkateparksHybrid(
     `[skateparkService] merged: ${merged.length} total (${ddbResults.length} DDB, ${osmResults.length} OSM)`,
   )
   return merged
+}
+
+/**
+ * Fire-and-forget cache write: persist OSM-only results to DDB so the next
+ * search in this area hits the cache. Failures are logged but do not surface
+ * to the user. Idempotency caveat: two concurrent searches over the same area
+ * could both write the same osmId since the schema has no uniqueness
+ * constraint on osmId (only `id` is unique). Duplicates collapse when read
+ * because the client merges by osmId. Run `npm run seed` periodically to
+ * dedupe.
+ */
+export async function cacheOsmResults(parks: Skatepark[]): Promise<void> {
+  if (!client) return
+  const toCache = parks.filter((p) => p.source === 'osm')
+  if (toCache.length === 0) return
+
+  const writes = toCache.map((p) =>
+    client.models.Skatepark.create({
+      osmId: p.id,
+      name: p.name,
+      lat: p.lat,
+      lng: p.lon,
+      address: p.address ?? null,
+      website: p.website ?? null,
+      description: p.description ?? null,
+      imageUrl: p.imageUrl ?? null,
+      imageAttribution: p.imageAttribution ?? null,
+      imageLicense: p.imageLicense ?? null,
+      placeType: p.placeType ?? 'park',
+      geohash: p.geohash ?? '',
+      region: closestRegion(p.lat, p.lon),
+    }),
+  )
+  const results = await Promise.allSettled(writes)
+  const failed = results.filter((r) => r.status === 'rejected')
+  if (failed.length) {
+    console.warn(`[skateparkService] cacheOsmResults: ${failed.length}/${toCache.length} writes failed`, failed)
+  } else {
+    console.log(`[skateparkService] cacheOsmResults: cached ${toCache.length} OSM records`)
+  }
 }

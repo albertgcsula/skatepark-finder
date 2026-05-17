@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect, use
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { PlaceType, Skatepark, GeocodeResult } from '../services/osmService';
 import { geocodeAddress } from '../services/osmService';
-import { fetchSkateparksHybrid } from '../services/skateparkService';
+import { cacheOsmResults, fetchSkateparksHybrid } from '../services/skateparkService';
 import { trackEvent } from '../services/analytics';
 
 const ALL_PLACE_TYPES: readonly PlaceType[] = ['park', 'spot', 'shop'];
@@ -42,6 +42,10 @@ export const SkateparkProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const parks = await fetchSkateparksHybrid(lat, lon, rad);
       setResults(parks);
+      // Fire-and-forget: persist OSM-only records to DDB so subsequent
+      // searches in this area become cache hits. Errors are swallowed by the
+      // service.
+      void cacheOsmResults(parks);
     } catch (err) {
       setError('Failed to fetch skateparks. Please try again.');
       console.error(err);

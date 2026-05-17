@@ -13,6 +13,7 @@ dist-ssr
 .amplify
 amplify_outputs.json
 .seed-prod
+/prod
 scripts/output
 .vscode
 __unconfig*
