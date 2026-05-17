@@ -21,6 +21,13 @@ const schema = a.schema({
       // 'park' | 'spot' | 'shop'. Optional so existing rows seeded before this
       // column was added remain valid; backfilled by the next seed run.
       placeType: a.string(),
+      // Yelp enrichment. All optional — populated by the ingest script when a
+      // Yelp business matches the OSM coords + name; null for parks with no
+      // Yelp match (DIY spots, unlisted parks).
+      rating: a.float(),
+      reviewCount: a.integer(),
+      phone: a.string(),
+      yelpUrl: a.url(),
     })
     .secondaryIndexes((index) => [
       index('region').sortKeys(['osmId']),

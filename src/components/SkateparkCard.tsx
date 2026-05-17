@@ -9,6 +9,7 @@ import {
   Button,
   Box,
   Link,
+  Rating,
 } from '@mui/material';
 import DirectionsIcon from '@mui/icons-material/Directions';
 import MapIcon from '@mui/icons-material/Map';
@@ -16,6 +17,8 @@ import LanguageIcon from '@mui/icons-material/Language';
 import ParkIcon from '@mui/icons-material/Park';
 import PlaceIcon from '@mui/icons-material/Place';
 import StorefrontIcon from '@mui/icons-material/Storefront';
+import PhoneIcon from '@mui/icons-material/Phone';
+import RateReviewIcon from '@mui/icons-material/RateReview';
 import type { PlaceType, Skatepark } from '../services/osmService';
 
 const PLACE_TYPE_META: Record<PlaceType, { label: string; icon: React.ReactElement; color: 'success' | 'info' | 'warning' }> = {
@@ -81,6 +84,15 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
         >
           {skatepark.name}
         </Typography>
+        {skatepark.rating != null && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1 }}>
+            <Rating value={skatepark.rating} precision={0.5} size="small" readOnly />
+            <Typography variant="body2" color="text.secondary">
+              {skatepark.rating.toFixed(1)}
+              {skatepark.reviewCount != null && ` (${skatepark.reviewCount})`}
+            </Typography>
+          </Box>
+        )}
         <Typography
           variant="body2"
           color="text.secondary"
@@ -150,6 +162,26 @@ export const SkateparkCard: React.FC<SkateparkCardProps> = ({ skatepark }) => {
             rel="noopener noreferrer"
           >
             Website
+          </Button>
+        )}
+        {skatepark.phone && (
+          <Button
+            size="small"
+            startIcon={<PhoneIcon />}
+            href={`tel:${skatepark.phone.replace(/[^\d+]/g, '')}`}
+          >
+            {skatepark.phone}
+          </Button>
+        )}
+        {skatepark.yelpUrl && (
+          <Button
+            size="small"
+            startIcon={<RateReviewIcon />}
+            href={skatepark.yelpUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Yelp
           </Button>
         )}
         <Button

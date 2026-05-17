@@ -17,6 +17,12 @@ export type Skatepark = {
   imageAttribution?: string;
   imageLicense?: string;
   website?: string;
+  // Yelp enrichment fields (populated by scripts/ingest.mjs when a Yelp
+  // business matches; absent for parks without a Yelp listing).
+  rating?: number;
+  reviewCount?: number;
+  phone?: string;
+  yelpUrl?: string;
   source?: 'ddb' | 'osm';
 }
 

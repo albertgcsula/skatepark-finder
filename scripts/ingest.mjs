@@ -2,13 +2,27 @@
 // Skatepark ingest: pull from OSM Overpass, enrich via free APIs, write JSON.
 // Usage: npm run ingest -- [--scope=nyc] [--bbox=south,west,north,east] [--out=path]
 
-import { writeFile, mkdir } from 'node:fs/promises'
+import { writeFile, mkdir, readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const ROOT = join(__dirname, '..')
+
+// Minimal .env loader: avoids adding a `dotenv` dep for one env var.
+const envPath = join(ROOT, '.env')
+if (existsSync(envPath)) {
+  const text = await readFile(envPath, 'utf8')
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i)
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2]
+  }
+}
 
 const USER_AGENT = 'SkateparkFinder-Ingest/1.0 (https://sk8finder.cloud; contact via github.com/albertgcsula/skatepark-finder)'
+const YELP_API_KEY = process.env.YELP_API_KEY
+const YELP_DAILY_CAP = 450 // soft stop below the documented 500/day to leave headroom for retries
 
 const PRESETS = {
   nyc: { south: 40.4774, west: -74.2591, north: 40.9176, east: -73.7004, label: 'New York City' },
@@ -282,7 +296,94 @@ async function fetchWikidata(qid) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Nominatim — reverse geocode for missing addresses (1 req/sec)
+// 5. Yelp Fusion — businesses near (lat,lng) for images, ratings, phone, URL
+
+// Free tier is ~500 /businesses/search calls/day. We track usage off the
+// RateLimit-Remaining header and stop calling Yelp once we've used our share
+// for this run (leaves headroom for retries / other runs the same day).
+let yelpCalls = 0
+let yelpRemaining = Infinity
+let yelpStopped = false
+
+function nameSimilarity(a, b) {
+  if (!a || !b) return 0
+  const tokensA = new Set(a.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter((t) => t.length > 2))
+  const tokensB = new Set(b.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter((t) => t.length > 2))
+  if (tokensA.size === 0 || tokensB.size === 0) return 0
+  let shared = 0
+  for (const t of tokensA) if (tokensB.has(t)) shared++
+  return shared / Math.min(tokensA.size, tokensB.size)
+}
+
+// Match a Yelp business to our OSM record. Two acceptance paths:
+//   1. Has the `skateparks` category alias AND is within 200m of the OSM coords.
+//   2. Name contains "skate" AND is within 150m AND has name overlap >= 0.3.
+// Stops on the first qualifying business (Yelp returns sort_by=distance, so
+// closest first).
+function pickYelpMatch(businesses, osmName, osmLat, osmLng) {
+  for (const b of businesses || []) {
+    const bLat = b.coordinates?.latitude
+    const bLng = b.coordinates?.longitude
+    if (bLat == null || bLng == null) continue
+    const dist = distanceMeters(osmLat, osmLng, bLat, bLng)
+    const isSkateparkCategory = (b.categories || []).some((c) => c.alias === 'skateparks')
+    const nameHasSkate = /skate/i.test(b.name || '')
+    if (isSkateparkCategory && dist <= 200) return { business: b, distanceMeters: dist }
+    if (nameHasSkate && dist <= 150 && nameSimilarity(osmName, b.name) >= 0.3) {
+      return { business: b, distanceMeters: dist }
+    }
+  }
+  return null
+}
+
+async function fetchYelp(name, lat, lng) {
+  if (!YELP_API_KEY) return null
+  if (yelpStopped) return null
+  if (yelpCalls >= YELP_DAILY_CAP || yelpRemaining <= 5) {
+    if (!yelpStopped) {
+      console.warn(`\n[ingest] Yelp quota guard hit (calls=${yelpCalls}, remaining=${yelpRemaining}); stopping Yelp lookups for the rest of this run.`)
+      yelpStopped = true
+    }
+    return null
+  }
+  try {
+    const url = `https://api.yelp.com/v3/businesses/search?term=skatepark&latitude=${lat}&longitude=${lng}&radius=400&limit=5&sort_by=distance`
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 15_000)
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${YELP_API_KEY}`, Accept: 'application/json' },
+      signal: ctrl.signal,
+    })
+    clearTimeout(timer)
+    yelpCalls++
+    const remainingHeader = res.headers.get('RateLimit-Remaining')
+    if (remainingHeader != null) yelpRemaining = parseInt(remainingHeader, 10)
+    if (res.status === 429) {
+      console.warn(`\n[ingest] Yelp returned 429 (daily limit). Halting Yelp lookups.`)
+      yelpStopped = true
+      return null
+    }
+    if (!res.ok) return { error: `${res.status} ${res.statusText}` }
+    const data = await res.json()
+    const match = pickYelpMatch(data.businesses, name, lat, lng)
+    if (!match) return null
+    const b = match.business
+    return {
+      name: b.name,
+      imageUrl: b.image_url || null,
+      rating: typeof b.rating === 'number' ? b.rating : null,
+      reviewCount: typeof b.review_count === 'number' ? b.review_count : null,
+      phone: b.display_phone || b.phone || null,
+      yelpUrl: b.url || null,
+      matchDistanceMeters: match.distanceMeters,
+    }
+  } catch (err) {
+    return { error: String(err) }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Nominatim — reverse geocode for missing addresses (1 req/sec)
 
 async function fetchNominatim(lat, lon) {
   return rateLimit(async () => {
@@ -347,8 +448,12 @@ async function enrichOne(el, namedFeatures = []) {
     address: null,
     website: tags.website ?? null,
     surface: tags.surface ?? null,
+    rating: null,
+    reviewCount: null,
+    phone: null,
+    yelpUrl: null,
     rawOsmTags: tags,
-    sources: { name: null, description: null, address: null },
+    sources: { name: null, description: null, address: null, rating: null },
     enrichedAt: new Date().toISOString(),
   }
 
@@ -423,6 +528,31 @@ async function enrichOne(el, namedFeatures = []) {
     }
   }
 
+  // Yelp — rating/phone/yelpUrl regardless of image state; image only if we
+  // still don't have one from OSM/Wikipedia/Wikidata.
+  const yelp = await fetchYelp(out.name, lat, lng)
+  if (yelp && !yelp.error) {
+    if (!out.imageUrl && yelp.imageUrl) {
+      out.imageUrl = yelp.imageUrl
+      out.imageSource = 'yelp'
+      out.imageLicense = null
+      out.imageAttribution = 'Yelp'
+    }
+    if (yelp.rating != null) {
+      out.rating = yelp.rating
+      out.reviewCount = yelp.reviewCount ?? null
+      out.sources.rating = 'yelp'
+    }
+    if (yelp.phone) out.phone = yelp.phone
+    if (yelp.yelpUrl) out.yelpUrl = yelp.yelpUrl
+    // Yelp's business name is usually cleaner than OSM tag noise — use as a
+    // last-resort name fallback only (don't overwrite a real OSM name).
+    if (!out.name && yelp.name) {
+      out.name = yelp.name
+      out.sources.name = 'yelp'
+    }
+  }
+
   // Wikimedia Commons geosearch — last-resort image (skate-keyword filtered)
   if (!out.imageUrl) {
     const geo = await fetchCommonsGeo(lat, lng)
@@ -486,6 +616,9 @@ async function enrichOne(el, namedFeatures = []) {
 
 async function main() {
   console.log(`[ingest] scope=${scope} bbox=${[bbox.south, bbox.west, bbox.north, bbox.east].join(',')} (${bbox.label || 'custom'})`)
+  if (!YELP_API_KEY) {
+    console.warn(`[ingest] YELP_API_KEY not set — Yelp enrichment will be skipped. Set it in .env to populate rating/phone/yelpUrl.`)
+  }
   console.log(`[ingest] fetching from Overpass...`)
   const elements = await fetchOverpass(bbox)
   console.log(`[ingest] fetched ${elements.length} OSM records (skateparks + named parks for enclosing-name lookup)`)
@@ -531,8 +664,12 @@ async function main() {
     withImage: enriched.filter((r) => r.imageUrl).length,
     withDescription: enriched.filter((r) => r.description).length,
     withAddress: enriched.filter((r) => r.address).length,
+    withRating: enriched.filter((r) => r.rating != null).length,
+    withPhone: enriched.filter((r) => r.phone).length,
     nameSources: tally(enriched.map((r) => r.sources.name)),
     imageSources: tally(enriched.map((r) => r.imageSource)),
+    yelpCalls,
+    yelpRemaining: Number.isFinite(yelpRemaining) ? yelpRemaining : null,
   }
 
   await mkdir(dirname(outPath), { recursive: true })
@@ -543,8 +680,11 @@ async function main() {
   console.log(`  with image:       ${stats.withImage}/${stats.total} (${pct(stats.withImage, stats.total)}%)`)
   console.log(`  with description: ${stats.withDescription}/${stats.total} (${pct(stats.withDescription, stats.total)}%)`)
   console.log(`  with address:     ${stats.withAddress}/${stats.total} (${pct(stats.withAddress, stats.total)}%)`)
+  console.log(`  with rating:      ${stats.withRating}/${stats.total} (${pct(stats.withRating, stats.total)}%)`)
+  console.log(`  with phone:       ${stats.withPhone}/${stats.total} (${pct(stats.withPhone, stats.total)}%)`)
   console.log(`  name sources:     ${JSON.stringify(stats.nameSources)}`)
   console.log(`  image sources:    ${JSON.stringify(stats.imageSources)}`)
+  console.log(`  yelp calls:       ${stats.yelpCalls}${stats.yelpRemaining != null ? ` (remaining today: ${stats.yelpRemaining})` : ''}`)
 }
 
 function tally(arr) {

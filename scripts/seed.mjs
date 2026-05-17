@@ -85,6 +85,10 @@ function toSkatepark(r) {
     geohash: geohash.encode(r.lat, r.lng, 9),
     region: r.region,
     placeType: classifyPlaceType(r.rawOsmTags),
+    rating: r.rating ?? null,
+    reviewCount: r.reviewCount ?? null,
+    phone: r.phone ?? null,
+    yelpUrl: r.yelpUrl ?? null,
   }
 }
 

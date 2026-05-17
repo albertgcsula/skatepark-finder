@@ -72,6 +72,10 @@ async function fetchFromDdb(lat: number, lon: number, radiusMiles: number): Prom
       imageAttribution: r.imageAttribution ?? undefined,
       imageLicense: r.imageLicense ?? undefined,
       website: r.website ?? undefined,
+      rating: r.rating ?? undefined,
+      reviewCount: r.reviewCount ?? undefined,
+      phone: r.phone ?? undefined,
+      yelpUrl: r.yelpUrl ?? undefined,
       placeType: (r.placeType ?? 'park') as PlaceType,
       geohash: r.geohash,
       distance: haversine(lat, lon, r.lat, r.lng),
@@ -153,6 +157,10 @@ export async function cacheOsmResults(parks: Skatepark[]): Promise<void> {
       placeType: p.placeType ?? 'park',
       geohash: p.geohash ?? '',
       region: closestRegion(p.lat, p.lon),
+      rating: p.rating ?? null,
+      reviewCount: p.reviewCount ?? null,
+      phone: p.phone ?? null,
+      yelpUrl: p.yelpUrl ?? null,
     }),
   )
   const results = await Promise.allSettled(writes)
