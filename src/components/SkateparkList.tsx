@@ -64,7 +64,7 @@ export const SkateparkList: React.FC = () => {
   return (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ mb: 3 }}>
-        Results near {location.displayName}
+        Results near {location.displayName} ({visibleResults.length})
       </Typography>
       <Grid container spacing={3} sx={{ alignItems: 'stretch' }}>
         {visibleResults.map((park) => (
